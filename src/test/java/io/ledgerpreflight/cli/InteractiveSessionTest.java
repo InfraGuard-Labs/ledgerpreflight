@@ -18,38 +18,30 @@ class InteractiveSessionTest {
         var a=new AssessmentService().assess(opts);StringWriter out=new StringWriter();new InteractiveSession(opts,a,root.resolve("reports"),terminal(script,out)).run();return out.toString();
     }
     @Test void menusFollowActualState(){
-        assertEquals(InteractiveSession.Action.UNDERSTAND,InteractiveSession.actions("BLOCKED").get(0));
-        assertEquals(InteractiveSession.Action.PREPARE,InteractiveSession.actions("READY FOR TVU").get(0));
-        assertEquals(InteractiveSession.Action.APPROVAL,InteractiveSession.actions("READY TO UPGRADE").get(0));
-        for(String state:List.of("BLOCKED","UNKNOWN","WARNING"))assertEquals(List.of("Understand the blockers","TVU validation","Reports & R3 Support","Exit"),InteractiveSession.actions(state).stream().map(a->a.label).toList());
+        assertEquals(List.of("View technical evidence","Create R3 support package","Run again","Exit"),InteractiveSession.actions("BLOCKED").stream().map(a->a.label).toList());
+        assertEquals(List.of("TVU instructions","View technical evidence","Exit"),InteractiveSession.actions("READY FOR TVU").stream().map(a->a.label).toList());
+        assertEquals(List.of("View upgrade checklist","View technical evidence","Exit"),InteractiveSession.actions("READY TO UPGRADE").stream().map(a->a.label).toList());
     }
-    @Test void eofExitsWithoutLooping()throws Exception {assertTrue(session(true,"").contains("Session complete · BLOCKED"));}
-    @Test void explainNavigatesBackAndShowsReasonNotOnlyTitle()throws Exception {
-        String out=session(true,"1\n1\n2\n3\n4\n5\n4\n");assertTrue(out.contains("WHAT CHANGED"));assertTrue(out.contains("JVM"));assertTrue(out.contains("Finding 2 of"));
+    @Test void eofExitsWithoutLooping()throws Exception {assertTrue(session(true,"").contains("Session complete · NOT READY TO UPGRADE"));}
+    @Test void resultExplainsGroupedProblemsWithoutNestedTroubleshootingMenus()throws Exception {
+        String out=session(true,"4\n");
+        for(String term:List.of("WHAT HAPPENED","WHY IT MATTERS","WHAT TO DO","NEXT STEP","CorDapp compatibility","TVU validation"))assertTrue(out.contains(term),term);
+        for(String term:List.of("Understand the blockers","Explain blockers","Show resolution plan","Confidence:","JVM descriptor"))assertFalse(out.contains(term),term);
     }
-    @Test void remediationConnectsApiAndClasspathDependencies()throws Exception {
-        String out=session(true,"1\n3\n1\n5\n4\n");assertTrue(out.contains("Then verify the actual verifier class sources"));assertTrue(out.contains("must precede TVU"));
+    @Test void evidenceIsAvailableOnDemand()throws Exception {
+        String out=session(true,"1\n1\n2\n8\n4\n");assertTrue(out.contains("COMPATIBILITY AND CLASSPATH"));assertTrue(out.contains("technicalEvidence"));
     }
     @Test void reportActionWritesCompleteTextHtmlJson()throws Exception {
-        assertTrue(session(true,"3\n1\n1\n4\n4\n").contains("Assessment generated"));
+        assertTrue(session(true,"1\n6\n1\n8\n4\n").contains("Assessment generated"));
         for(String name:List.of("report.html","report.json","technical-assessment.txt"))assertTrue(Files.size(root.resolve("reports").resolve(name))>100);
     }
     @Test void supportActionCreatesValidatedZip()throws Exception {
-        assertTrue(session(true,"3\n2\n1\n4\n4\n").contains("READY TO SHARE"));
+        assertTrue(session(true,"2\n1\n4\n").contains("READY TO SHARE"));
         try(var paths=Files.list(root.resolve("reports"))){assertEquals(1,paths.filter(p->p.toString().endsWith(".zip")).count());}
     }
-    @Test void cancelledImportDoesNotAnalyzeOrSwitchAssessment()throws Exception {
-        String out=session(true,"2\n4\n/nonexistent\n3\n1\n5\n4\n");assertFalse(out.contains("does not exist"));assertTrue(out.contains("Session complete · BLOCKED"));
-    }
-    @Test void invalidCompareKeepsCurrentTargetAndMenu()throws Exception {
-        assertTrue(session(true,"1\n4\n/nonexistent\n1\n5\n4\n").contains("Your current assessment remains available"));
-    }
-    @Test void targetChangeDropsOldTvuAndTargetOverrides()throws Exception {
-        var old=SyntheticFixtureFactory.create(root.resolve("old"),true);var clean=SyntheticFixtureFactory.create(root.resolve("next"),false);
-        var a=new AssessmentService().assess(old.options(true));StringWriter out=new StringWriter();
-        new InteractiveSession(old.options(true),a,root.resolve("reports"),terminal("1\n4\n"+clean.kit()+"\n1\n5\n4\n",out)).run();
-        assertTrue(out.toString().contains("RESOLVED"));assertTrue(out.toString().contains("TVU evidence and target overrides were reset"));
-        try(var paths=Files.walk(root.resolve("reports"))){Path report=paths.filter(p->p.endsWith("report.json")).findFirst().orElseThrow();var json=Reports.JSON.readTree(report.toFile());assertFalse(json.path("evidence").path("tvu-summary").path("completeSuccess").asBoolean());}
+    @Test void runAgainProducesFreshAssessment()throws Exception {
+        assertTrue(session(true,"3\n4\n").contains("Assessment updated"));
+        try(var paths=Files.list(root.resolve("reports"))){assertTrue(paths.anyMatch(p->p.getFileName().toString().startsWith("reassessment-")));}
     }
     @Test void comparisonDoesNotMergeDistinctMethodsUnderSameRule(){
         Finding a=finding("alpha"),b=finding("beta");Assessment old=new Assessment("1","0.1.0","BLOCKED","4.11","4.12",List.of(a,b),Map.of());
@@ -84,7 +76,7 @@ class InteractiveSessionTest {
     }
     @Test void importSuccessfulTvuUpdatesMenuAndExitCode()throws Exception {
         var fixture=SyntheticFixtureFactory.create(root.resolve("import"),false);var options=fixture.options(false);var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
-        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("3\n"+fixture.log()+"\n1\n1\n4\n",out)).run();
+        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n1\n"+fixture.log()+"\n1\n1\n3\n",out)).run();
         assertEquals(0,code);assertTrue(out.toString().contains("Session complete · READY TO UPGRADE"));
     }
     private Path cloneFor(SyntheticFixtureFactory.Fixture fixture)throws IOException {
@@ -93,14 +85,14 @@ class InteractiveSessionTest {
     }
     @Test void cancelledExecutionWritesNoCapture()throws Exception {
         var fixture=SyntheticFixtureFactory.create(root.resolve("cancel"),false);Path clone=cloneFor(fixture);var options=fixture.options(false);var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
-        new InteractiveSession(options,a,root.resolve("reports"),terminal("2\n"+clone+"\nNO\n1\n6\n",out)).run();
-        assertTrue(out.toString().contains("TVU execution cancelled"));try(var paths=Files.list(root.resolve("reports"))){assertEquals(0,paths.count());}
+        new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n2\n"+clone+"\nNO\n1\n3\n",out)).run();
+        assertTrue(out.toString().contains("TVU execution cancelled"));try(var paths=Files.list(root.resolve("reports"))){assertFalse(paths.anyMatch(p->p.getFileName().toString().startsWith("tvu-run")));}
     }
     @Test void failedApprovedTvuNeverReturnsReady()throws Exception {
         // The synthetic TVU has no executable main: launch must fail, never fabricate success.
         var fixture=SyntheticFixtureFactory.create(root.resolve("failed"),false);Path clone=cloneFor(fixture);var options=fixture.options(false);var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
-        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("2\n"+clone+"\nRUN TVU ON COPY\n1\n4\n",out)).run();
-        assertEquals(4,code);assertTrue(out.toString().contains("Session complete · UNKNOWN"));
+        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n2\n"+clone+"\nRUN TVU ON COPY\n1\n4\n",out)).run();
+        assertEquals(4,code);assertTrue(out.toString().contains("Session complete · NOT READY TO UPGRADE"));
     }
     @Test void mainScreenHidesInternalEnumsAndAnalyzerVersion()throws Exception {
         var f=SyntheticFixtureFactory.create(root.resolve("main"),false);var a=new AssessmentService().assess(f.options(false));String text=AssessmentInsights.header(a)+AssessmentInsights.summary(a);
@@ -113,12 +105,22 @@ class InteractiveSessionTest {
         for(String term:List.of("Static preflight: Review required","Target TVU: Found","Target CorDapps: 1","Legacy dependencies: Review required","Mixed-case"))assertTrue(text.contains(term),term);
     }
     @Test void supportResultHasFinalSafetyAndExternalChecksum()throws Exception {
-        String out=session(true,"3\n2\n1\n3\n1\n4\n4\n");
+        String out=session(true,"2\n1\n1\n7\n1\n8\n4\n");
         assertTrue(out.contains("Final package rescanned"));assertTrue(out.contains("GENERATED ARTIFACTS"));
         try(var paths=Files.list(root.resolve("reports"))){assertEquals(1,paths.filter(p->p.toString().endsWith(".sha256")).count());}
     }
     @Test void databaseReviewNeverShowsCredentials()throws Exception {
         Path conf=root.resolve("node.conf");Files.writeString(conf,"database.url=\"jdbc:postgresql://person:password@db.example/validation?password=hidden\"\n");
         assertEquals("jdbc:postgresql://db.example/validation",TvuExecution.databaseTarget(conf));
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"dataSourceProperties.dataSource.url","dataSourceProperties.\"dataSource.url\"","database.url","dataSource.url","\"dataSource.url\""})
+    void guidedTvuRecognizesEverySupportedExplicitJdbcKey(String key)throws Exception {
+        Path conf=root.resolve("node.conf");Files.writeString(conf,key+"=\"jdbc:postgresql://db.example/validation\"\n");
+        assertEquals("jdbc:postgresql://db.example/validation",TvuExecution.databaseTarget(conf));
+    }
+    @Test void guidedTvuRejectsConflictingConnectionDeclarations()throws Exception {
+        Path conf=root.resolve("node.conf");Files.writeString(conf,"database.url=\"jdbc:postgresql://db.example/one\"\ndataSource.url=\"jdbc:postgresql://db.example/two\"\n");
+        assertTrue(assertThrows(IOException.class,()->TvuExecution.databaseTarget(conf)).getMessage().contains("conflict"));
     }
 }

@@ -14,7 +14,7 @@ public final class SupportBundle {
     private static final ObjectMapper JSON=new ObjectMapper();
     private static final Set<String> ALLOWED=Set.of("README.txt","summary.txt","summary.html","assessment.json",
         "environment.json","upgrade-kit.json","cordapps-current.json","cordapps-target.json","runtime-api-delta.json",
-        "node-discovery.json","discovery.json","other-jars-current.json","other-jars-target.json","internal-api-usage.json","legacy-jars-analysis.json","classpath-analysis.json","schema-analysis.json",
+        "node-discovery.json","analysis-coverage.json","discovery.json","other-jars-current.json","other-jars-target.json","internal-api-usage.json","legacy-jars-analysis.json","classpath-analysis.json","schema-analysis.json",
         "tvu-summary.json","findings.json","reproduction.txt","sanitized-node.conf");
     public Path create(Path output, Map<String,String> permittedEvidence) throws IOException {
         if(permittedEvidence.isEmpty()) throw new IOException("Support bundle has no evidence");

@@ -49,11 +49,13 @@ public class SessionTerminal {
     public int choose(String title,List<String> labels)throws IOException {
         if(advanced) {
             String saved;
-            try {saved=stty("-g").strip();stty("-icanon","-echo","min","0","time","1");}
+            try {saved=terminalMode("-g").strip();terminalMode("-icanon","-echo","min","0","time","1");}
             catch(Exception e){advanced=false;return choose(title,labels);}
-            Thread restore=new Thread(()->{try{stty(saved);}catch(Exception ignored){}},"restore-terminal");
-            Runtime.getRuntime().addShutdownHook(restore);
+            Thread restore=new Thread(()->restore(saved),"restore-terminal");
+
             try {
+                Runtime.getRuntime().addShutdownHook(restore);
+                out.print("\u001b[?25l");out.flush();
                 int selected=0; draw(title,labels,selected);
                 while(true) {
                     int c=input.read();
@@ -66,7 +68,7 @@ public class SessionTerminal {
                     else continue;
                     draw(title,labels,selected);
                 }
-            } finally {try{stty(saved);}catch(Exception ignored){}Runtime.getRuntime().removeShutdownHook(restore);out.print("\u001b["+(labels.size()+1)+"B\r\n");out.flush();}
+            } finally {restore(saved);try{Runtime.getRuntime().removeShutdownHook(restore);}catch(IllegalStateException shuttingDown){}out.print("\u001b["+(labels.size()+1)+"B\r\n");out.flush();}
         }
         text("\n"+title);
         for(int i=0;i<labels.size();i++)text((i+1)+". "+labels.get(i));
@@ -74,12 +76,14 @@ public class SessionTerminal {
             try{int n=Integer.parseInt(s);if(n>=1&&n<=labels.size())return n-1;}catch(NumberFormatException ignored){}
             text("Choose one of the displayed actions.");}
     }
+    private void restore(String saved){try{terminalMode(saved);}catch(Exception ignored){}finally{out.print("\u001b[?25h");out.flush();}}
     private void draw(String title,List<String> labels,int selected) {
         // Redraw only this menu, leaving assessment and explanations in scrollback.
         out.print("\r\u001b[J");out.println(safe(title));
         for(int i=0;i<labels.size();i++){String s=safe(labels.get(i));out.println((i==selected?cursor+" ":"  ")+(s.length()>width-3?s.substring(0,width-6)+"...":s));}
         out.print((width<40?"Up/Down | Enter | q back":"Up/Down select | Enter open | q back")+"\u001b["+(labels.size()+1)+"A\r");out.flush();
     }
+    protected String terminalMode(String...args)throws Exception{return stty(args);}
     private static String stty(String...args)throws Exception {
         List<String> command=new ArrayList<>(List.of("/bin/stty"));command.addAll(List.of(args));
         Process p=new ProcessBuilder(command).redirectInput(new File("/dev/tty")).redirectError(ProcessBuilder.Redirect.DISCARD).start();

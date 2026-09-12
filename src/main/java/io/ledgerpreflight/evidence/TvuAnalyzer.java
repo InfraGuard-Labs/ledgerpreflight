@@ -13,7 +13,7 @@ public final class TvuAnalyzer {
             Map<String,Integer> rootCauses, boolean schemaValidationFailure, boolean consistent,
             boolean completeSuccess, List<String> issues) { }
     private static final int MAX_ENTRIES=2000, MAX_ARCHIVE_BYTES=64*1024*1024;
-    private static final Pattern COUNTS=Pattern.compile("(?i)\\b(transactions?\\s+expected|expected(?:\\s+transactions?)?|transactions?\\s+processed|processed(?:\\s+transactions?)?|succeeded|successful(?:\\s+transactions?)?|verification\\s+failed|failed(?:\\s+transactions?)?|failures)\\s*[:=]\\s*([0-9][0-9,]*)");
+    private static final Pattern COUNTS=Pattern.compile("(?i)\\b(total(?:\\s+transactions?)?|transactions?\\s+total|transactions?\\s+expected|expected(?:\\s+transactions?)?|transactions?\\s+processed|processed(?:\\s+transactions?)?|passed(?:\\s+transactions?)?|succeeded|successful(?:\\s+transactions?)?|verification\\s+failed|failed(?:\\s+transactions?)?|failures)\\s*[:=]\\s*([0-9][0-9,]*)");
     private static final Pattern ROOT=Pattern.compile("(?m)(?:^|[\\s\\[:])((?:[a-zA-Z_$][\\w$]*\\.){0,64}[A-Za-z_$][\\w$]*(?:Error|Exception))(?:\\s*:\\s*([^\\r\\n]{0,1000}))?");
     private static final class State {
         Long expected,processed,succeeded,failed; boolean schema,conflict,unknownDetails; int details; long bytes;
@@ -24,9 +24,9 @@ public final class TvuAnalyzer {
             while(m.find()) {
                 long n; try { n=Long.parseLong(m.group(2).replace(",","")); } catch(NumberFormatException e) { throw new IOException("TVU counter exceeds supported range"); }
                 String k=m.group(1).toLowerCase(Locale.ROOT); Long prior;
-                if(k.contains("expected")) { prior=expected; expected=n; }
+                if(k.contains("expected")||k.contains("total")) { prior=expected; expected=n; }
                 else if(k.contains("processed")) { prior=processed; processed=n; }
-                else if(k.contains("succeed")||k.contains("successful")) { prior=succeeded; succeeded=n; }
+                else if(k.contains("succeed")||k.contains("successful")||k.contains("passed")) { prior=succeeded; succeeded=n; }
                 else { prior=failed; failed=n; }
                 if(prior!=null && prior!=n) conflict=true;
             }

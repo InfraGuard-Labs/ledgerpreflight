@@ -27,7 +27,7 @@ public final class Discovery {
     private static boolean cordappType(String name,Map<String,ClassInfo> classes,Set<String> seen){
         if(name==null)return false;Deque<String> pending=new ArrayDeque<>();pending.add(name);
         while(!pending.isEmpty()){String next=pending.removeFirst();if(!seen.add(next))continue;
-            if(Set.of("net/corda/core/contracts/Contract","net/corda/core/contracts/UpgradedContract","net/corda/core/flows/FlowLogic").contains(next))return true;
+            if(Set.of("net/corda/core/contracts/Contract","net/corda/core/contracts/UpgradedContract","net/corda/core/contracts/ContractState","net/corda/core/flows/FlowLogic").contains(next))return true;
             ClassInfo c=classes.get(next);if(c!=null){if(c.superName()!=null)pending.add(c.superName());pending.addAll(c.interfaces());}}
         return false;
     }
@@ -68,7 +68,6 @@ public final class Discovery {
         if(topLevel(tvu).size()!=1||!uniqueVersion(tvu).equals(destination))reasons.add("One matching target TVU has not been established");
         int oldApps=topLevel(select(current,"CORDAPP","LEGACY_CONTRACT")).size(),newApps=topLevel(apps).size();
         if(oldApps==0||newApps==0)reasons.add("CorDapp evidence is incomplete; a node with no applications requires review");
-        if(java.util.stream.Stream.concat(current.issues().stream(),target.issues().stream()).anyMatch(i->!i.message().startsWith("Symbolic link outside supplied root skipped:")))reasons.add("Some supplied artifacts could not be fully inspected; assessment coverage is incomplete");
         return new Model(source,destination,metadata(oldRuntime,true),metadata(runtime,true),metadata(oldRuntime,false),metadata(runtime,false),oldApps,newApps,otherJars(current).size(),otherJars(target).size(),unknown?"UNKNOWN":reasons.isEmpty()?"HIGH":"MEDIUM",List.copyOf(reasons));
     }
     private static String metadata(List<JarInventory> jars,boolean platform){var physical=topLevel(jars);if(physical.size()!=1)return "Unknown";String value=platform?platform(physical.get(0)):attr(physical.get(0),"Min-Java-Version");return value.isBlank()?"Unknown":value;}

@@ -17,7 +17,7 @@ final class DiscoverySession {
         var node=found.nodes().get(selection);Path config=o.nodeConf();
         if(config==null&&node.configs().size()==1)config=node.configs().get(0);
         else if(config==null&&node.configs().size()>1){int n=terminal.choose("Select the active node configuration",node.configs().stream().map(p->node.root().relativize(p).toString()).toList());if(n<0)return null;config=node.configs().get(n);}
-        var scanner=new BytecodeScanner();var current=scanner.scan(node.root());var target=scanner.scan(o.kit());
+        var scanner=new ArtifactDiscovery();var current=scanner.scan(node.root());var target=scanner.scan(o.kit());
         Path runtime=o.targetCorda(),tvu=o.tvuJar();
         if(runtime==null&&Discovery.topLevel(Discovery.select(target,"RUNTIME")).size()>1){runtime=selectArtifact(o.kit(),Discovery.topLevel(Discovery.select(target,"RUNTIME")),"Select target Corda runtime",terminal);if(runtime==null)return null;}
         if(tvu==null&&Discovery.topLevel(Discovery.select(target,"TVU")).size()>1){tvu=selectArtifact(o.kit(),Discovery.topLevel(Discovery.select(target,"TVU")),"Select target TVU artifact",terminal);if(tvu==null)return null;}
@@ -29,20 +29,23 @@ final class DiscoverySession {
         var apps=o.targetCordapps()==null?Discovery.select(target,"CORDAPP"):Discovery.select(scanner.scan(o.targetCordapps()),"CORDAPP");
         var model=Discovery.model(current,target,oldRuntime,newRuntime,validators,apps,settings);
         String schema=Objects.toString(settings.get("effectiveSchema"),"Unknown");
-        String summary="LedgerPreflight 0.1.0\n────────────────────────────────────────\nNODE DISCOVERED\n\n"+Discovery.displayName(settings,node.root().getFileName().toString())+"\n\nType         "+settings.getOrDefault("nodeType","Unknown")+"\nRole         Unknown\n"+("Notary".equals(settings.get("nodeType"))?"Mode         "+settings.getOrDefault("notaryMode","Unknown")+"\n":"")+
-            "Corda        "+human(model.sourceVersion())+"\nPlatform     "+human(model.sourcePlatform())+"\nJava         "+human(HostEnvironment.inspect(o.hostEnvironment()).currentJava())+"\nDatabase     "+settings.getOrDefault("databaseVendor","Unknown")+"\nSchema       "+schema+"\nCorDapp JARs  "+model.currentCordappJars()+" current → "+model.targetCordappJars()+" target\nOther JARs    "+model.currentOtherJars()+" current → "+model.targetOtherJars()+" target\nTarget       "+human(model.targetVersion())+"\nTVU          "+(validators.size()==1?"Found · "+human(Discovery.uniqueVersion(validators)):validators.isEmpty()?"Not found":"Ambiguous")+"\n\nDiscovery confidence: "+model.confidence()+"\n";
-        while(true){
-            terminal.screen();terminal.text(summary);int action=terminal.choose("",List.of("Continue assessment","Review discovered details","Exit"));
-            if(action<0||action==2){terminal.text("Discovery complete. Assessment was not run.");return null;}if(action==0)break;
-            terminal.screen();terminal.text("DISCOVERED DETAILS\nNode root: "+node.root()+"\nLegal identity: "+settings.getOrDefault("myLegalName","Not supplied")+"\nConfiguration: "+Objects.toString(config,"Not discovered")+"\nUpgrade kit: "+o.kit()+"\nBusiness role: Unknown; no business role inferred.\nSchema confidence: "+settings.getOrDefault("schemaConfidence","UNKNOWN")+"\nSchema: "+schema+" · "+settings.getOrDefault("schemaExplanation","Evidence not established")+"\nSchema declarations: "+settings.getOrDefault("schemaDeclarations",Map.of())+"\nCurrent runtime metadata: "+runtimeDetails(oldRuntime)+"\nTarget runtime metadata: "+runtimeDetails(newRuntime)+"\nDiscovery confidence: "+model.confidence()+(model.confidenceReasons().isEmpty()?"":"\n"+String.join("\n",model.confidenceReasons()))+"\n"+concerns(found.issues())+"\n"+coverage(current,target)+"\nInputs are inspected read-only. No database connection is made.");
-            List<String> actions=new ArrayList<>(List.of("Back"));
-            if(found.issues().stream().anyMatch(i->i.startsWith("Symbolic link outside supplied root skipped:")))actions.add("View skipped paths");
-            if(!coverageIssues(current,target).isEmpty())actions.add("View bytecode coverage evidence");
-            while(true){int detail=terminal.choose("",actions);if(detail<=0)break;terminal.screen();
-                if(actions.get(detail).equals("View skipped paths"))terminal.text(String.join("\n",found.issues().stream().filter(i->i.startsWith("Symbolic link outside supplied root skipped:")).toList()));
-                else terminal.text("BYTECODE COVERAGE EVIDENCE\n"+String.join("\n",coverageIssues(current,target).stream().map(i->i.path()+": "+i.message()).toList()));
-            }
-        }
+        int schemas=settings.get("schemas") instanceof List<?> names?names.size():0;
+        String schemaLines=schemas>1?"Schemas      "+("CONFIGURED".equals(settings.get("schemaResolution"))?schemas+" detected\nPrimary      "+settings.get("primarySchema"):"Multiple · configuration needs review"):"Schema       "+schema;
+        String type=Objects.toString(settings.get("nodeType"),"Unknown");
+        if(type.equals("Notary"))type=settings.getOrDefault("notaryMode","Unknown")+" notary";
+        String summary="LedgerPreflight 0.1.0\n────────────────────────────────────────\n\nNODE DISCOVERED\n\n"+Discovery.displayName(settings,node.root().getFileName().toString())+"\n\n"+
+            "Type         "+type+"\nCorda        "+human(model.sourceVersion())+" · Platform "+human(model.sourcePlatform())+
+            "\nTarget       "+human(model.targetVersion())+" · Platform "+human(model.targetPlatform())+
+            "\nJava         "+human(HostEnvironment.inspect(o.hostEnvironment()).currentJava())+
+            "\nDatabase     "+settings.getOrDefault("databaseVendor","Unknown")+"\n"+schemaLines+
+            "\nCorDapp JARs  "+model.currentCordappJars()+" current → "+model.targetCordappJars()+" target"+
+            "\nTVU          "+(validators.size()==1?"Found":validators.isEmpty()?"Not found":"Multiple · select intended artifact")+"\n";
+        if(model.sourceVersion().equals("unknown"))summary+="\nCurrent Corda release could not be determined from one runtime's metadata.\n";
+        if(model.targetVersion().equals("unknown"))summary+="\nTarget Corda release could not be determined from one runtime's metadata.\n";
+        if(!"CONFIGURED".equals(settings.get("schemaResolution")))summary+="\nSchema configuration needs review; the effective schema is not established.\n";
+        if(validators.isEmpty())summary+="\nAdd the intended target TVU artifact to the upgrade kit.\n";
+        terminal.screen();terminal.text(summary);
+        if(terminal.choose("",List.of("Continue","Exit"))!=0){terminal.screen();terminal.text("LedgerPreflight 0.1.0\nSession complete. Assessment was not run.");return null;}
         return new AssessmentService.Options(node.root(),o.kit(),runtime,tvu,o.targetCordapps(),o.legacyJars(),config,o.tvuResults(),o.verifierClasspath(),o.rulePack(),o.networkMode(),o.hostEnvironment());
     }
     private static List<String> runtimeDetails(List<JarInventory> jars){return jars.stream().map(j->Discovery.version(j)+" · platform "+Discovery.platform(j)+" · "+Discovery.attr(j,"Corda-Vendor")+" · minimum Java "+human(Discovery.attr(j,"Min-Java-Version"))).toList();}

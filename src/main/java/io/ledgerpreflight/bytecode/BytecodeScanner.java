@@ -43,7 +43,7 @@ public final class BytecodeScanner {
                 var tree=io.ledgerpreflight.evidence.BoundedPaths.discover(absolute,32,limits.maxEntries());
                 for(String issue:tree.issues())issues.add(new ScanIssue("LP-INPUT-001","discovery",issue));
                 Set<Path> scanned=new HashSet<>();
-                for(Path input:tree.files())if(input.toString().toLowerCase(Locale.ROOT).endsWith(".jar")&&scanned.add(input.toRealPath()))scanFile(input.toRealPath(),absolute.relativize(input).toString().replace((char)92,'/'),jars,issues,budget);
+                for(Path input:tree.files())if(io.ledgerpreflight.core.ArtifactDiscovery.isArchive(input)&&scanned.add(input.toRealPath()))scanFile(input.toRealPath(),absolute.relativize(input).toString().replace((char)92,'/'),jars,issues,new Budget());
             }
         }catch(IOException|UncheckedIOException|SecurityException e){issues.add(new ScanIssue("LP-INPUT-001",absolute.getFileName().toString(),e.getMessage()));}
         jars.sort(Comparator.comparing(JarInventory::path));issues.sort(Comparator.comparing(ScanIssue::path).thenComparing(ScanIssue::message));

@@ -19,7 +19,7 @@ dependencies {
 }
 dependencyLocking { lockAllConfigurations() }
 application { mainClass.set("io.ledgerpreflight.cli.Main") }
-tasks.test { environment("LP_DISCOVERY_TEST_IDENTITY", "Example Company"); environment("LP_DISCOVERY_SECRET", "CredentialFixture91"); useJUnitPlatform(); finalizedBy(tasks.jacocoTestReport) }
+tasks.test { environment("LP_DISCOVERY_TEST_IDENTITY", "Example Company"); environment("LP_DISCOVERY_SECRET", "CredentialFixture91"); useJUnitPlatform(); testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }; finalizedBy(tasks.jacocoTestReport) }
 jacoco { toolVersion = "0.8.12" }
 tasks.jacocoTestReport { reports { xml.required.set(true); html.required.set(true) } }
 tasks.withType<AbstractArchiveTask>().configureEach {

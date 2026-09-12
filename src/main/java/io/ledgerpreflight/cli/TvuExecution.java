@@ -22,7 +22,7 @@ public final class TvuExecution {
         // A different path alone is insufficient: reject a copied production connection URL.
         Path original=options.nodeConf()==null?options.node().resolve("node.conf"):options.nodeConf();
         String originalUrl=jdbc(original),cloneUrl=jdbc(conf);
-        if(cloneUrl==null||cloneUrl.equals(originalUrl))throw new IOException("Validation copy must explicitly use a different disposable database URL from the assessed node.");
+        if(originalUrl==null||cloneUrl==null||cloneUrl.equals(originalUrl))throw new IOException("Validation copy must explicitly use a different disposable database URL from the assessed node.");
         Path jar=options.tvuJar();
         if(jar==null) {
             var candidates=Reports.JSON.valueToTree(assessment.evidence().get("upgrade-kit"));List<Path> matches=new ArrayList<>();
@@ -51,9 +51,12 @@ public final class TvuExecution {
         new ConfigAnalyzer().analyze(conf);
         String text=new String(SafeInputs.read(conf,1024*1024),StandardCharsets.UTF_8);
         var config=com.typesafe.config.ConfigFactory.parseString(text);
-        for(String key:List.of("dataSourceProperties.dataSource.url","dataSourceProperties.\"dataSource.url\"","database.url"))
-            if(config.hasPath(key))try{return config.getString(key);}catch(com.typesafe.config.ConfigException e){throw new IOException("Database URL must be explicit; substitutions are not accepted for execution.");}
-        return null;
+        Set<String> urls=new LinkedHashSet<>();
+        for(String key:List.of("dataSourceProperties.dataSource.url","dataSourceProperties.\"dataSource.url\"","database.url","dataSource.url","\"dataSource.url\""))
+            try{if(config.hasPath(key))urls.add(config.getString(key));}
+            catch(com.typesafe.config.ConfigException e){throw new IOException("Database URL must be explicit; substitutions are not accepted for execution.");}
+        if(urls.size()>1)throw new IOException("Database URL declarations conflict; resolve the validation configuration before execution.");
+        return urls.isEmpty()?null:urls.iterator().next();
     }
     public static String databaseTarget(Path conf)throws IOException {
         String url=jdbc(conf);if(url==null)return "Not established";

@@ -64,18 +64,14 @@ public final class ConfigAnalyzer {
             if(init==null) init=value(cfg,"connectionInitSql");
             if(init==null) init=value(cfg,"dataSourceProperties.\"dataSource.connectionInitSql\"");
             settings.put("connectionInitSqlPresent",init!=null);
-            List<String> searchPath=new ArrayList<>();
+            List<String> searchPath=new ArrayList<>(),jdbcPath=new ArrayList<>();
             boolean quotedIdentifiers=false;
+            if(current!=null)jdbcPath.addAll(schemaPath(current,false,issues));
             if(init!=null) {
                 Matcher search=Pattern.compile("(?i)\\bset\\s+(?:session\\s+)?search_path\\s*(?:=|to)\\s*([^;]+)").matcher(init);
-                if(search.find()) for(String element:search.group(1).split(",")) {
-                    String identifier=element.strip();
-                    if(identifier.matches("\"[A-Za-z_][A-Za-z0-9_$]*\"")) { quotedIdentifiers=true; searchPath.add(identifier.substring(1,identifier.length()-1)); }
-                    else if(identifier.matches("[A-Za-z_][A-Za-z0-9_$]*")) searchPath.add(identifier.toLowerCase(Locale.ROOT));
-                    else issues.add("connectionInitSql search_path contains unsupported expressions; validate it manually");
-                }
+                if(search.find()){String declaration=search.group(1);quotedIdentifiers=declaration.contains("\"");searchPath.addAll(schemaPath(declaration,true,issues));if(search.find())issues.add("search_path contains unsupported expressions: multiple assignments require review");}
             }
-            settings.put("searchPath",List.copyOf(searchPath)); settings.put("quotedIdentifierSensitivity",quotedIdentifiers);
+            settings.put("searchPath",List.copyOf(searchPath));settings.put("jdbcSchemaPath",List.copyOf(jdbcPath));settings.put("quotedIdentifierSensitivity",quotedIdentifiers);
             for(String key:List.of("database.runMigration","database.initialiseSchema","devMode","detectPublicIp"))
                 if(cfg.hasPath(key)) settings.put(key,cfg.getBoolean(key));
             for(String key:List.of("p2pAddress","rpcSettings.address","rpcSettings.adminAddress","rpcSettings.useSsl","compatibilityZoneURL","networkServices","externalVerifier"))
@@ -86,17 +82,25 @@ public final class ConfigAnalyzer {
                 settings.put(key+"Count",args.size()); settings.put(key+"SafeMemorySettings",List.copyOf(safeArgs));
             }
             List<String> declarations=new ArrayList<>();
-            for(String declared:Arrays.asList(schema,current,hibernate))if(declared!=null)declarations.add(identifier(declared));
+            for(String declared:Arrays.asList(schema,hibernate))if(declared!=null)declarations.add(identifier(declared));
+            if(!jdbcPath.isEmpty())declarations.add(jdbcPath.get(0));
             if(!searchPath.isEmpty())declarations.add(searchPath.get(0));
             boolean conflict=declarations.stream().distinct().count()>1;
             boolean unresolvedSchema=issues.stream().anyMatch(i->i.contains("unsupported expressions")||i.startsWith("Unresolved")&&!i.endsWith("notary")&&!i.endsWith("notary.validating")&&!i.endsWith("myLegalName"));
             settings.put("schemaDeclarations",Collections.unmodifiableMap(new TreeMap<>(Map.of("database.schema",Objects.toString(schema,"Not supplied"),"JDBC currentSchema",Objects.toString(current,"Not supplied"),"Hibernate default_schema",Objects.toString(hibernate,"Not supplied"),"search_path",searchPath))));
             settings.put("schemaResolution",unresolvedSchema?"UNRESOLVED":conflict?"AMBIGUOUS":declarations.isEmpty()?"DEFAULT_UNVERIFIED":"CONFIGURED");
             settings.put("effectiveSchema",unresolvedSchema?"Unknown":conflict?"Ambiguous":declarations.isEmpty()?"Default (not independently established)":declarations.get(0));
+            LinkedHashSet<String> schemas=new LinkedHashSet<>();
+            if(schema!=null)schemas.add(identifier(schema));if(hibernate!=null)schemas.add(identifier(hibernate));
+            schemas.addAll(jdbcPath);schemas.addAll(searchPath);
+            String primary=unresolvedSchema||conflict||declarations.isEmpty()?"":declarations.get(0);
+            settings.put("primarySchema",primary);
+            settings.put("schemas",List.copyOf(schemas));
+            settings.put("additionalSchemas",schemas.stream().filter(name->!name.equals(primary)).toList());
             settings.put("schemaExplanation",unresolvedSchema?"Required schema evidence is unresolved":conflict?"Explicit schema declarations disagree":declarations.isEmpty()?"No explicit schema declaration; database defaults are unverified":declarations.size()==1?"One explicit schema declaration; database behavior is unverified":"Explicit schema declarations agree");
             settings.put("schemaConfidence",unresolvedSchema||conflict||declarations.isEmpty()?"UNKNOWN":declarations.size()>1?"HIGH":"MEDIUM");
             if (conflict) issues.add("Schema declarations disagree; verify effective TVU and node schema separately");
-            boolean mixed=declarations.stream().anyMatch(d->!d.equals(d.toLowerCase(Locale.ROOT)));
+            boolean mixed=schemas.stream().anyMatch(d->!d.equals(d.toLowerCase(Locale.ROOT)));
             if (mixed&&"postgresql".equals(jdbcType)) issues.add("Mixed-case schema requires explicit TVU schema-resolution validation");
             settings.put("configurationConfidence",issues.stream().anyMatch(i->i.startsWith("Unresolved"))?"UNKNOWN":"HIGH");
             settings.put("configurationSource",path.getFileName().toString());
@@ -107,10 +111,28 @@ public final class ConfigAnalyzer {
             throw new IOException("Malformed or unsupported HOCON configuration");
         }
     }
+    /** PostgreSQL paths preserve order and quoted commas; SQL folds unquoted names, JDBC supplies names. */
+    private static List<String> schemaPath(String declaration,boolean foldUnquoted,List<String> issues) {
+        List<String> result=new ArrayList<>();int i=0;
+        while(i<declaration.length()) {
+            while(i<declaration.length()&&Character.isWhitespace(declaration.charAt(i)))i++;
+            boolean quoted=i<declaration.length()&&declaration.charAt(i)=='"';StringBuilder name=new StringBuilder();boolean closed=!quoted;
+            if(quoted){i++;while(i<declaration.length()){char c=declaration.charAt(i++);if(c=='"'){if(i<declaration.length()&&declaration.charAt(i)=='"'){name.append('"');i++;}else{closed=true;break;}}else name.append(c);}}
+            else while(i<declaration.length()&&declaration.charAt(i)!=',')name.append(declaration.charAt(i++));
+            while(i<declaration.length()&&Character.isWhitespace(declaration.charAt(i)))i++;
+            String value=quoted?name.toString():name.toString().strip();
+            if(!closed||value.isEmpty()||value.equals("$user")||(!quoted&&!value.matches("[A-Za-z_][A-Za-z0-9_$]*"))||i<declaration.length()&&declaration.charAt(i)!=',') {
+                issues.add("Schema path contains unsupported expressions; primary schema requires review");return List.copyOf(result);
+            }
+            result.add(foldUnquoted&&!quoted?value.toLowerCase(Locale.ROOT):value);
+            if(i<declaration.length()){i++;if(i==declaration.length())issues.add("Schema path contains unsupported expressions: empty final schema");}
+        }
+        return List.copyOf(result);
+    }
     private static String identifier(String declaration) {
-        String value=declaration.strip();
+        String value=declaration.strip();if(value.isEmpty())throw new IllegalArgumentException("Empty schema identifier");
         if(value.startsWith("\"")){int end=1;StringBuilder out=new StringBuilder();while(end<value.length()){char c=value.charAt(end++);if(c=='"'){if(end<value.length()&&value.charAt(end)=='"'){out.append(c);end++;}else return out.toString();}else out.append(c);}throw new IllegalArgumentException("Unclosed schema identifier");}
-        return value.split(",",2)[0].strip();
+        return value;
     }
     private static String value(Config c,String key) {
         try { if (!c.hasPath(key)) return null; } catch(ConfigException.NotResolved e){return null;}

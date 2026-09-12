@@ -10,13 +10,8 @@ import java.util.*;
 /** A live assessment session. Each action operates on the currently selected target. */
 public final class InteractiveSession {
     enum Action {
-        UNDERSTAND("Understand the blockers"), TVU("TVU validation"), REPORTS("Reports & R3 Support"),
-        EXPLAIN("Explain blockers"), REVIEW("Show all findings"), PLAN("Show resolution plan"),
-        READINESS("Check TVU readiness"), PREPARE("Prepare TVU validation"), RUN("Run guided TVU validation"),
-        IMPORT("Import existing TVU results"), REPORT("Generate technical assessment"),
-        SUPPORT("Create sanitized R3 Support package"), ARTIFACTS("View generated artifacts"),
-        COMPARE("Compare another target Corda version"), ASSESSMENT("Review assessment"),
-        APPROVAL("Generate change-approval report"), PACKAGE("Create evidence package"), FINAL("Review final assessment"), BACK("Back"), EXIT("Exit");
+        EVIDENCE("View technical evidence"), SUPPORT("Create R3 support package"), AGAIN("Run again"),
+        INSTRUCTIONS("TVU instructions"), CHECKLIST("View upgrade checklist"), EXIT("Exit");
         final String label;Action(String label){this.label=label;}
     }
     private AssessmentService.Options options;
@@ -30,86 +25,61 @@ public final class InteractiveSession {
         rememberReports(this.output);
     }
     static List<Action> actions(String status) {
-        if(status.equals("READY FOR TVU"))return List.of(Action.PREPARE,Action.RUN,Action.IMPORT,Action.ASSESSMENT,Action.REPORTS,Action.EXIT);
-        if(status.equals("READY TO UPGRADE"))return List.of(Action.APPROVAL,Action.PACKAGE,Action.FINAL,Action.EXIT);
-        return List.of(Action.UNDERSTAND,Action.TVU,Action.REPORTS,Action.EXIT);
+        if(status.equals("READY FOR TVU"))return List.of(Action.INSTRUCTIONS,Action.EVIDENCE,Action.EXIT);
+        if(status.equals("READY TO UPGRADE"))return List.of(Action.CHECKLIST,Action.EVIDENCE,Action.EXIT);
+        return List.of(Action.EVIDENCE,Action.SUPPORT,Action.AGAIN,Action.EXIT);
     }
     public int run()throws IOException {
-        Assessment displayed=null;
+        Reports.write(output,Reports.files(assessment));
         while(true) {
-            terminal.screen();
-            if(displayed!=assessment){terminal.text(AssessmentInsights.header(assessment));terminal.text(AssessmentInsights.summary(assessment));displayed=assessment;}
-            else terminal.text("LedgerPreflight · "+assessment.sourceVersion()+" → "+assessment.targetVersion()+"\n"+assessment.status()+"\n");
+            terminal.screen();terminal.text(ProductView.result(assessment));
             List<Action> choices=actions(assessment.status());
-            if(AssessmentInsights.blockers(assessment).isEmpty()&&choices.contains(Action.UNDERSTAND))choices=List.of(Action.ASSESSMENT,Action.TVU,Action.REPORTS,Action.EXIT);
-            int selection=terminal.choose(assessment.status().equals("READY TO UPGRADE")?"OPTIONAL":"WHAT WOULD YOU LIKE TO DO?",choices.stream().map(a->a.label).toList());
-            if(selection<0||choices.get(selection)==Action.EXIT){terminal.screen();terminal.text("LedgerPreflight "+assessment.productVersion()+"\nSession complete · "+assessment.status()+"\nYour assessment is saved.\nReports: "+output+"\nNo node upgrade or migration was performed.");return assessment.exitCode();}
-            Action selected=choices.get(selection);
-            if(Set.of(Action.UNDERSTAND,Action.TVU,Action.REPORTS).contains(selected))submenu(selected);
-            else perform(selected);
-        }
-    }
-    private void submenu(Action group)throws IOException {
-        List<Action> choices=switch(group){
-            case UNDERSTAND->List.of(Action.EXPLAIN,Action.REVIEW,Action.PLAN,Action.COMPARE,Action.BACK);
-            case TVU->List.of(Action.READINESS,Action.PREPARE,Action.RUN,Action.IMPORT,Action.BACK);
-            default->List.of(Action.REPORT,Action.SUPPORT,Action.ARTIFACTS,Action.BACK);
-        };
-        String title=switch(group){case UNDERSTAND->"UNDERSTAND THE BLOCKERS";case TVU->"TVU VALIDATION";default->"REPORTS & R3 SUPPORT";};
-        while(true){
-            terminal.screen();terminal.text("LedgerPreflight · "+assessment.status()+"\n");
-            int selection=terminal.choose(title,choices.stream().map(a->a.label).toList());
-            if(selection<0||choices.get(selection)==Action.BACK)return;
-            Assessment before=assessment;
-            perform(choices.get(selection));
-            if(before!=assessment)return;
-        }
-    }
-    private void perform(Action action)throws IOException {
+            int selected=terminal.choose("",choices.stream().map(a->a.label).toList());
+            if(selected<0||choices.get(selected)==Action.EXIT){
+                terminal.screen();terminal.text("LedgerPreflight "+assessment.productVersion()+"\nSession complete · "+ProductView.state(assessment)+"\nAssessment saved: "+output.resolve("report.html"));
+                return assessment.exitCode();
+            }
             terminal.screen();
-            try {switch(action) {
-                case EXPLAIN -> explain();case REVIEW -> review();case PLAN -> terminal.text(AssessmentInsights.plan(assessment));
-                case ASSESSMENT, FINAL -> review();case APPROVAL -> report();case PACKAGE -> support();
-                case READINESS -> terminal.text(AssessmentInsights.tvuReadiness(assessment,options.tvuJar()));
-                case PREPARE -> prepare();case RUN -> runTvu();case IMPORT -> importTvu();case REPORT -> report();
-                case SUPPORT -> support();case COMPARE -> compare();case ARTIFACTS -> artifacts();default -> {}
-            }}catch(Exception e){terminal.text("! Action could not complete: "+Objects.toString(e.getMessage(),"unknown error")+"\nYour current assessment remains available.");}
-            if(!Set.of(Action.EXPLAIN,Action.REVIEW,Action.ASSESSMENT,Action.FINAL).contains(action))terminal.choose("",List.of("Back"));
+            try {switch(choices.get(selected)){
+                case EVIDENCE -> technical();
+                case SUPPORT -> {support();terminal.choose("",List.of("Back"));}
+                case AGAIN -> reanalyze(options,fresh("reassessment"));
+                case INSTRUCTIONS -> instructions();
+                case CHECKLIST -> {checklist();terminal.choose("",List.of("Back"));}
+                default -> {}
+            }}catch(Exception e){terminal.text("! Action could not complete: "+Objects.toString(e.getMessage(),"unknown error")+"\nYour current assessment remains available.");terminal.choose("",List.of("Back"));}
+        }
     }
-    private void explain()throws IOException {
-        List<Finding> findings=AssessmentInsights.blockers(assessment);
-        if(findings.isEmpty())findings=assessment.findings().stream().filter(f->Set.of("WARNING","UNKNOWN").contains(f.severity())).toList();
-        if(findings.isEmpty()){terminal.text("No blockers or unresolved findings in this assessment.");terminal.choose("",List.of("Back"));return;}
-        int index=0;
+    private void technical()throws IOException {
         while(true) {
             terminal.screen();
-            terminal.text("\nFinding "+(index+1)+" of "+findings.size()+"\n"+AssessmentInsights.explanation(findings.get(index)));
-            int action=terminal.choose("EXPLORE THIS FINDING",List.of("Show technical evidence","Next blocker","Previous blocker","Back"));
-            if(action<0||action==3)return;
-            if(action==0)evidence(findings.get(index));
-            else index=Math.floorMod(index+(action==1?1:-1),findings.size());
+            int choice=terminal.choose("TECHNICAL EVIDENCE",List.of("Compatibility and classpath","Runtime and artifact identity","Schema configuration","TVU results","Analysis coverage","Generate technical assessment","View generated artifacts","Back"));
+            if(choice<0||choice==7)return;
+            terminal.screen();
+            switch(choice){
+                case 0 -> page("COMPATIBILITY AND CLASSPATH\n"+Reports.json(assessment.findings())+"\nRuntime comparison\n"+Reports.json(assessment.evidence().get("runtime-api-delta"))+"\nClasspath order\n"+Reports.json(assessment.evidence().get("classpath-analysis")));
+                case 1 -> page("ARTIFACT IDENTITY\n"+Reports.json(assessment.evidence().get("discovery"))+"\nCurrent physical artifacts\n"+Reports.json(assessment.evidence().get("environment"))+"\nTarget physical artifacts\n"+Reports.json(assessment.evidence().get("upgrade-kit"))+"\nHashes\n"+Reports.json(assessment.hashes()));
+                case 2 -> page("SCHEMA CONFIGURATION\n"+Reports.json(assessment.evidence().get("schema-analysis")));
+                case 3 -> page("TVU RESULTS\n"+Reports.json(assessment.evidence().get("tvu-summary")));
+                case 4 -> page("ANALYSIS COVERAGE\n"+Reports.json(assessment.evidence().get("analysis-coverage"))+"\nDiscovery paths\n"+Reports.json(assessment.evidence().get("node-discovery")));
+                case 5 -> {report();terminal.choose("",List.of("Back"));}
+                case 6 -> {artifacts();terminal.choose("",List.of("Back"));}
+                default -> {}
+            }
         }
     }
-    private void evidence(Finding finding)throws IOException {
-        terminal.screen();terminal.text(AssessmentInsights.technicalEvidence(finding));
-        if(terminal.choose("",List.of("Back","View raw JSON"))!=1)return;
-        page(Reports.json(finding)+"\nRuntime comparison\n"+Reports.json(assessment.evidence().get("runtime-api-delta"))+
-            "\nClasspath source\n"+Reports.json(assessment.evidence().get("classpath-analysis"))+"\nArtifact hashes\n"+Reports.json(assessment.hashes())+"\nEnvironment evidence\n"+Reports.json(assessment.evidence().get("environment")));
+    private void instructions()throws Exception {
+        terminal.text("TVU INSTRUCTIONS\n\n"+AssessmentInsights.tvuReadiness(assessment,options.tvuJar()));
+        terminal.text("Validate a backed-up isolated node and database copy first.\nUse the target TVU and rebuilt target CorDapps.\nConfirm the intended Hibernate default schema for TVU.\nStatic analysis does not replace complete TVU validation.\n\nSupply completed logs or an error ZIP with --tvu-results, or import below.");
+        int choice=terminal.choose("",List.of("Import TVU evidence","Run TVU on an isolated copy","Back"));
+        if(choice==0)importTvu();else if(choice==1)runTvu();else return;
+        terminal.choose("",List.of("Continue"));
     }
     private void page(String text)throws IOException {
         String[] lines=text.split("\n");
         for(int i=0;i<lines.length;i+=14){terminal.screen();terminal.text(String.join("\n",Arrays.copyOfRange(lines,i,Math.min(i+14,lines.length))));
             if(i+14<lines.length){if(terminal.choose("DETAILS",List.of("Continue","Back"))!=0)return;}
             else terminal.choose("End of technical evidence",List.of("Back"));}
-    }
-    private void review()throws IOException {
-        for(Finding f:assessment.findings()) {
-            terminal.text(f.severity()+" · "+f.id()+" · "+f.title()+"\n"+f.impact());
-            int n=terminal.choose("REVIEW FINDING",List.of("Next finding","Explain this finding","Technical evidence","Back"));
-            if(n<0||n==3)return;if(n==1)terminal.text(AssessmentInsights.explanation(f));if(n==2)evidence(f);
-        }
-        terminal.text("All findings reviewed.");
-        terminal.choose("",List.of("Back"));
     }
     private void report()throws IOException {
         terminal.text("Generating complete technical assessment…");
@@ -144,7 +114,7 @@ public final class InteractiveSession {
     }
     private void prepare() {
         terminal.text("TVU PREPARATION · "+assessment.targetVersion()+"\n"+AssessmentInsights.header(assessment));
-        terminal.text("1. Prepare a backed-up, isolated node copy and a disposable 4.11/4.12 database copy.\n2. Configure the copy's node.conf to use that database; keep the real node unchanged.\n3. Place the intended target CorDapps and dependencies in the copy's cordapps/legacy-jars directories.\n4. Review missing-runtime, API and schema findings before execution.\n5. Choose Run guided TVU validation to inspect and explicitly approve the command.\nTVU may write to the selected copy and contact its configured database. LedgerPreflight does not create or migrate databases.\nGuide: https://docs.r3.com/en/platform/corda/4.12/enterprise/node/operating/tvu/running-tvu.html");
+        terminal.text("1. Prepare a backed-up, isolated node copy and a disposable database copy.\n2. Configure the copy's node.conf to use that database; keep the real node unchanged.\n3. Place the intended target CorDapps and dependencies in the copy's cordapps/legacy-jars directories.\n4. Review missing-runtime, API and schema findings before execution.\n5. Inspect and explicitly approve the command before running TVU.\nTVU may write to the selected copy and contact its configured database. LedgerPreflight does not create or migrate databases.\nGuide: https://docs.r3.com/en/platform/corda/4.12/enterprise/node/operating/tvu/running-tvu.html");
     }
     private void runTvu()throws Exception {
         prepare();String input=terminal.ask("Prepared isolated validation-copy directory");if(input.isEmpty())return;
@@ -172,19 +142,12 @@ public final class InteractiveSession {
         reanalyze(withTvu(paths),fresh("imported-tvu"));
     }
     private AssessmentService.Options withTvu(List<Path> paths){return new AssessmentService.Options(options.node(),options.kit(),options.targetCorda(),options.tvuJar(),options.targetCordapps(),options.legacyJars(),options.nodeConf(),paths,options.verifierClasspath(),options.rulePack(),options.networkMode(),options.hostEnvironment());}
-    private void compare()throws IOException {
-        String path=terminal.ask("Another prepared upgrade-kit directory");if(path.isEmpty())return;
-        Path kit=Path.of(path);Main.ensureOutputSeparate(sessionRoot,kit);if(!Files.isDirectory(kit))throw new IOException("Upgrade kit must be a directory");
-        var candidate=new AssessmentService.Options(options.node(),kit,null,null,null,null,options.nodeConf(),List.of(),null,options.rulePack(),options.networkMode(),options.hostEnvironment());
-        Assessment next=new AssessmentService().assess(candidate,terminal::text);
-        terminal.text(AssessmentInsights.comparison(assessment,next));commit(candidate,next,fresh("target-comparison"));
-    }
     private void reanalyze(AssessmentService.Options candidate,Path destination)throws IOException {commit(candidate,new AssessmentService().assess(candidate,terminal::text),destination);}
     private void commit(AssessmentService.Options candidate,Assessment next,Path destination)throws IOException {
         Reports.write(destination,Reports.files(next));options=candidate;assessment=next;output=destination;
         rememberReports(destination);terminal.text("Assessment updated · "+next.status()+"\nReports: "+destination);
     }
     private void checklist() {
-        terminal.text("FINAL UPGRADE CHECKLIST · "+assessment.targetVersion()+"\n✓ Static and supplied TVU gates passed in this assessment.\n1. Confirm TVU evidence belongs to these exact artifacts and the intended full database snapshot.\n2. Confirm verified backups, restore rehearsal, target Java and deployment permissions.\n3. Confirm signing continuity, network compatibility and remaining operational checks in R3's guide.\n4. Attach the technical report and obtain change approval.\n5. Execute the official upgrade procedure with your rollback plan ready.\nLedgerPreflight has not modified or upgraded your node.");
+        terminal.text("UPGRADE CHECKLIST · "+assessment.targetVersion()+"\n\n1. Validate the upgrade in a lower environment first.\n2. Confirm rebuilt target CorDapps, signing continuity and target Java.\n3. Verify complete successful TVU evidence for these exact artifacts\n   and the intended database snapshot; static checks do not replace TVU.\n4. Confirm backups, restore rehearsal and the rollback plan.\n5. Follow the supported network upgrade sequence. During rolling or\n   sequential upgrades, avoid processing transactions across incompatible\n   mixed versions; coordinate participants and notaries as required.\n6. Obtain change approval and follow the supported Corda upgrade guide.\n7. Run validation/test transactions and check node health after upgrade.\n\nLedgerPreflight has not modified or upgraded your node.");
     }
 }

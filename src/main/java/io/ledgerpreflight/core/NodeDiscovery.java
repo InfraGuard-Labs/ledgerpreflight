@@ -29,7 +29,7 @@ public final class NodeDiscovery {
         for(Path path:candidates){Path base=path.getParent();
             // Do not merge sibling nodes merely because a shared parent contains a JAR.
             if(Set.of("config","conf","settings","etc","configuration").contains(base.getFileName().toString())&&base.getParent()!=null&&base.getParent().startsWith(tree.root())){
-                try(var entries=Files.newDirectoryStream(base.getParent(),"*.jar")){for(Path jar:entries)if(!Discovery.select(new io.ledgerpreflight.bytecode.BytecodeScanner().scan(jar),"RUNTIME").isEmpty()){base=base.getParent();break;}}
+                try(var entries=Files.newDirectoryStream(base.getParent())){for(Path jar:entries)if(Files.isRegularFile(jar)&&ArtifactDiscovery.isArchive(jar)&&!Discovery.select(new ArtifactDiscovery().scan(jar),"RUNTIME").isEmpty()){base=base.getParent();break;}}
             }
             grouped.computeIfAbsent(base,k->new ArrayList<>()).add(path);
         }

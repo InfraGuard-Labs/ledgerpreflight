@@ -1,7 +1,7 @@
 """Execute the packaged CLI in real Ubuntu PTYs; render only the emulator cell buffer.
 No HTML, reconstructed CLI text or screenshot text edits are used.
 """
-import os, pty, select, time, termios, fcntl, struct, json, pathlib, subprocess, codecs, shutil, hashlib
+import re, os, pty, select, time, termios, fcntl, struct, json, pathlib, subprocess, codecs, shutil, hashlib
 import pyte
 from PIL import Image, ImageDraw, ImageFont
 JAR=os.environ.get('LP_TEST_JAR','/dist/ledger-preflight-0.1.0.jar')
@@ -9,24 +9,30 @@ ROOT=pathlib.Path('/dist');SHOTS=ROOT/'screenshots';SHOTS.mkdir(exist_ok=True)
 TRANS=ROOT/'terminal-transcripts';TRANS.mkdir(exist_ok=True)
 results={};manifest=[]
 FONT=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',18)
-for kind in ('replay','clean'):
-    source=pathlib.Path('/dist/synthetic')/kind
+for kind in ('environment','blocked','clean'):
+    source=ROOT/'synthetic/product-acceptance'/kind
     destination=pathlib.Path('/work')/kind
     shutil.copytree(source,destination)
     (destination/'current-node').rename(destination/'ExampleIssuer')
-
+    expected=json.loads((ROOT/'synthetic/product-acceptance'/(kind+'-asserted')/'report.json').read_text())
+    identity=expected['evidence']['discovery'];schema=expected['evidence']['schema-analysis']['safeSettings']
+    assert (identity['sourcePlatform'],identity['targetPlatform'],identity['confidence'])==('13','140','HIGH')
+    assert (identity['currentCordappJars'],identity['targetCordappJars'])==(2,2)
+    assert expected['sourceVersion']=='4.11.6' and expected['targetVersion']=='4.12.11'
+    assert schema['databaseVendor']=='PostgreSQL'
+    if kind=='environment':assert schema['schemas']==['ExampleMixedCaseIssuer','shared_reference']
 class Terminal:
-    def __init__(self,name,kind='replay',args=(),cols=92,rows=52,env=None,node=None,kit=None,guided=False):
+    def __init__(self,name,kind='blocked',args=(),cols=92,rows=52,env=None,node=None,kit=None,guided=False,output=None):
         self.name=name;self.cols=cols;self.rows=rows;self.data=bytearray();self.decoder=codecs.getincrementaldecoder('utf8')('replace')
         self.screen=pyte.Screen(cols,rows);self.stream=pyte.Stream(self.screen)
         base='/work/'+kind
-        extras=[]
-        if kind=='replay':extras=['--tvu-results',base+'/tvu.log','--tvu-results',base+'/errors.zip','--verifier-classpath',base+'/classpath.txt']
+        extras=['--host-environment',base+'/host.json','--network-mode','all-4.12']
+        if kind=='blocked':extras+=['--tvu-results',base+'/tvu.log','--tvu-results',base+'/errors.zip','--verifier-classpath',base+'/classpath.txt']
         self.pid,self.fd=pty.fork()
         if self.pid==0:
             os.environ['TERM']='xterm-256color';os.environ.pop('CI',None)
             if env:os.environ.update(env)
-            os.execvp('java',['java','-jar',JAR] if guided else ['java','-jar',JAR,'assess','--node',node or base+'/ExampleIssuer','--upgrade-kit',kit or base+'/upgrade-kit','--output','/work/reports/'+name,*extras,*args])
+            os.execvp('java',['java','-jar',JAR] if guided else ['java','-jar',JAR,'assess','--node',node or base+'/ExampleIssuer','--upgrade-kit',kit or base+'/upgrade-kit','--output',output or '/work/reports/'+name,*extras,*args])
         fcntl.ioctl(self.fd,termios.TIOCSWINSZ,struct.pack('HHHH',rows,cols,0,0))
     def read(self,timeout=.1):
         if select.select([self.fd],[],[],timeout)[0]:
@@ -46,6 +52,7 @@ class Terminal:
     def menu(self):
         self.until('Up/Down');assert '> ' in '\n'.join(self.screen.display)
         assert not any(g in '\n'.join(self.screen.display) for g in ('❯','□','■','▶'))
+        assert b'\x1b[?25l' in self.data and self.screen.cursor.hidden
     def choose(self,n):
         if n>1:
             os.write(self.fd,b'\x1b[B'*(n-1));self.until('Up/Down')
@@ -70,66 +77,75 @@ class Terminal:
                 assert attrs[3]&termios.ECHO and attrs[3]&termios.ICANON
                 code=os.waitstatus_to_exitcode(status);assert code==expected,(self.name,code,expected)
                 (TRANS/(self.name+'.ansi')).write_bytes(self.data)
-                results[self.name]={'exit':code,'terminalRestored':True};return
+                hidden=b'\x1b[?25l' in self.data
+                if hidden:assert self.data.rfind(b'\x1b[?25h')>self.data.rfind(b'\x1b[?25l') and not self.screen.cursor.hidden
+                results[self.name]={'exit':code,'terminalRestored':True,'cursorHiddenDuringMenu':hidden,'cursorRestored':not self.screen.cursor.hidden};return
         os.kill(self.pid,9);raise AssertionError('Session failed to exit: '+self.name+'\n'+self.data.decode(errors='replace')[-2500:])
 
-t=Terminal('guided-start','clean',guided=True);t.until('Current node directory:');os.write(t.fd,b'/work/clean/ExampleIssuer\n');t.until('Target upgrade-kit directory:');os.write(t.fd,b'/work/clean/upgrade-kit\n');t.menu();t.choose(1);t.menu();t.choose(6);t.finish(1)
-t=Terminal('guided-cancel','clean',guided=True);t.until('Current node directory:');os.write(t.fd,b'\n');t.finish(0)
-t=Terminal('guided-ci','clean',guided=True,env={'CI':'true'});t.finish(0);assert b'Current node directory:' not in t.data
-s=Terminal('blocked');s.menu();s.shot('17-discovery-summary.png');assert 'NODE DISCOVERED' in '\n'.join(s.screen.display)
-s.choose(2);s.menu();s.shot('18-discovery-details.png');s.choose(1);s.menu();s.choose(1);s.menu();s.shot('01-blocked-main.png')
-assert 'Understand the blockers' in '\n'.join(s.screen.display)
-assert 'Showing 2 of' in '\n'.join(s.screen.display) and 'additional warnings' in '\n'.join(s.screen.display)
-s.choose(1);s.menu();s.shot('04-understand-blockers-menu.png')
-s.choose(1);s.menu();s.shot('05-blocker-explanation.png')
-for heading in ('WHAT LEDGERPREFLIGHT FOUND','WHAT CHANGED','WHY THIS FAILS','IMPACT','EVIDENCE','RECOMMENDED NEXT ACTION'):assert heading in '\n'.join(s.screen.display)
-s.choose(1);s.menu();s.shot('12-technical-evidence.png')
-assert 'TECHNICAL EVIDENCE' in '\n'.join(s.screen.display) and 'View raw JSON' in '\n'.join(s.screen.display)
-s.choose(1);s.menu() # human evidence -> explanation
-s.choose(4);s.menu() # understand submenu
-s.choose(3);s.menu();s.shot('13-resolution-plan.png')
-s.choose(1);s.menu();s.choose(5);s.menu()
-s.choose(2);s.menu();s.shot('06-tvu-validation-menu.png')
-s.choose(1);s.menu();s.shot('07-tvu-readiness.png')
-s.choose(1);s.menu();s.choose(2);s.menu();s.shot('14-tvu-preparation.png')
-s.choose(1);s.menu();s.choose(5);s.menu()
-s.choose(3);s.menu();s.shot('08-reports-support-menu.png')
-s.choose(1);s.menu();s.shot('09-technical-report-created.png')
-s.choose(1);s.menu();s.choose(2);s.menu();s.shot('10-r3-support-ready.png')
-assert 'READY TO SHARE' in '\n'.join(s.screen.display)
-assert 'ExampleIssuer-R3-support-' in '\n'.join(s.screen.display) and 'Final package rescanned' in '\n'.join(s.screen.display)
-s.choose(1);s.menu();s.choose(3);s.menu();s.shot('15-generated-artifacts.png')
-s.choose(1);s.menu();s.choose(4);s.menu();s.choose(4);s.finish(2);s.shot('11-exit.png')
-for name,args,shot,code in [('static',[],'02-ready-for-tvu-main.png',1),('ready',['--tvu-results','/work/clean/tvu.log'],'03-ready-to-upgrade-main.png',0)]:
-    t=Terminal(name,'clean',args);t.menu();t.choose(1);t.menu();t.shot(shot);assert 'Understand the blockers' not in '\n'.join(t.screen.display);t.choose(6 if name=='static' else 4);t.finish(code)
-for name,keys in [('ctrl-d',b'\x04'),('ctrl-c',b'\x03')]:
-    t=Terminal(name);t.menu();t.choose(1);t.menu();os.write(t.fd,keys);t.finish(130 if name=='ctrl-c' else 2)
-t=Terminal('plain','clean',['--plain-terminal']);t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');os.write(t.fd,b'6\n');t.finish(1);assert b'\x1b[' not in t.data
-# A narrow plain terminal displays full wrapped labels rather than hiding the action name.
-t=Terminal('narrow','clean',['--plain-terminal'],cols=40,rows=52);t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');t.shot('16-narrow-terminal.png');os.write(t.fd,b'6\n');t.finish(1)
+def display(t):return '\n'.join(t.screen.display)
+def no_internal(t):
+    for text in ('Other JARs','Discovery confidence','REQUIRED_OR_UNRESOLVED','Analyzer:','JVM descriptor','legacy-jars/','sha256','PARTIAL','MEDIUM','HIGH','Understand the blockers'):
+        assert text not in display(t),text
+t=Terminal('environment','environment');t.menu()
+for expected in ('NODE DISCOVERED','ExampleIssuer','4.11.6','Platform 13','4.12.11','Platform 140','1.8.0_242','Schemas      2 detected','Primary      ExampleMixedCaseIssuer','2 current','2 target','TVU          Found','> Continue'):
+    assert expected in display(t),expected
+no_internal(t);t.shot('01-environment-discovered.png');t.choose(2);t.finish(0)
+
+t=Terminal('blocked');t.menu();t.choose(1);t.menu();no_internal(t)
+for term in ('NOT READY TO UPGRADE','WHAT HAPPENED','WHY IT MATTERS','WHAT TO DO','NEXT STEP','201 supplied failures match','449 passed','2 issues need attention','Create R3 support package'):
+    assert term in display(t),term
+t.shot('02-blocked-result.png')
+t.choose(1);t.menu();t.shot('05-technical-evidence.png');t.choose(6);t.menu()
+assert 'Assessment generated' in display(t);t.shot('06-technical-assessment-created.png')
+t.choose(1);t.menu();t.choose(8);t.menu();t.choose(2);t.menu()
+assert 'READY TO SHARE' in display(t) and 'Final package rescanned' in display(t)
+t.shot('07-r3-support-ready.png');t.choose(1);t.menu();t.choose(4);t.finish(2);t.shot('08-clean-exit.png')
+
+t=Terminal('ready-for-tvu','clean');t.menu();t.choose(1);t.menu();no_internal(t)
+assert 'READY FOR TVU' in display(t) and 'TVU instructions' in display(t)
+t.shot('03-ready-for-tvu.png');t.choose(1);t.menu();t.shot('09-tvu-instructions.png')
+t.choose(1);t.until('TVU log, error ZIP');os.write(t.fd,b'/work/clean/tvu.log\n');t.menu();t.choose(1);t.menu();t.choose(1);t.menu()
+assert 'READY TO UPGRADE' in display(t) and 'View upgrade checklist' in display(t)
+t.choose(1);t.menu();t.shot('10-upgrade-checklist.png');t.choose(1);t.menu();t.choose(3);t.finish(0)
+
+t=Terminal('ready-to-upgrade','clean',['--tvu-results','/work/clean/tvu.log']);t.menu();t.choose(1);t.menu()
+assert 'READY TO UPGRADE' in display(t);no_internal(t);t.shot('04-ready-to-upgrade.png');t.choose(3);t.finish(0)
+for name,key,code in [('q',b'q',2),('ctrl-c',b'\x03',130)]:
+    t=Terminal(name);t.menu();t.choose(1);t.menu();os.write(t.fd,key);t.finish(code)
+t=Terminal('sigterm');t.menu();os.kill(t.pid,15);t.finish(143)
+t=Terminal('unexpected-output-failure','clean',output='/proc/ledgerpreflight-unwritable');t.menu();t.choose(1);t.finish(3)
+assert b'Assessment error' in t.data
+t=Terminal('run-again');t.menu();t.choose(1);t.menu();t.choose(3);t.menu()
+assert 'NOT READY TO UPGRADE' in display(t);t.choose(4);t.finish(2)
+
+t=Terminal('plain','clean',['--plain-terminal']);t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');os.write(t.fd,b'3\n');t.finish(1);assert b'\x1b[' not in t.data
+t=Terminal('narrow','clean',['--plain-terminal'],cols=40,rows=52);t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');t.shot('11-narrow-terminal.png');os.write(t.fd,b'3\n');t.finish(1)
+t=Terminal('ssh-arrows','clean',cols=36,rows=52,env={'SSH_TTY':'/dev/pts/1','LANG':'C.UTF-8'});t.menu()
+os.write(t.fd,b'\x1b[B');t.until('Up/Down');assert '> Exit' in display(t)
+os.write(t.fd,b'\x1b[A');t.until('Up/Down');assert '> Continue' in display(t);os.write(t.fd,b'q');t.finish(0)
 for name,args,env in [('ci',[],{'CI':'true'}),('noninteractive',['--non-interactive'],None),('json',['--json'],None)]:
-    t=Terminal(name,'clean',args,env=env);t.finish(1);assert b'WHAT WOULD YOU LIKE' not in t.data
-proc=subprocess.run(['java','-jar',JAR,'assess','--node','/work/clean/ExampleIssuer','--upgrade-kit','/work/clean/upgrade-kit','--output','/work/reports/piped','--json'],capture_output=True,timeout=30)
-assert proc.returncode==1 and json.loads(proc.stdout)['status']=='READY FOR TVU';results['piped-json']='PASS'
-# Parent node selection is bounded and uses observed notary configuration.
-company=pathlib.Path('/work/company');company.mkdir()
-shutil.copytree('/work/clean/ExampleIssuer',company/'Custodian')
-shutil.copytree('/work/clean/ExampleIssuer',company/'Notary')
+    t=Terminal(name,'clean',args,env=env);t.finish(1);assert b'\x1b[' not in re.sub(rb'\x1b\[[0-9;]*m',b'',t.data)
+    if name!='noninteractive':assert b'\x1b[' not in t.data
+p=subprocess.run(['java','-jar',JAR,'assess','--node','/work/clean/ExampleIssuer','--upgrade-kit','/work/clean/upgrade-kit','--host-environment','/work/clean/host.json','--output','/work/reports/piped','--json'],capture_output=True,timeout=45)
+assert p.returncode==1 and json.loads(p.stdout)['status']=='READY FOR TVU' and b'\x1b[' not in p.stdout
+results['piped-json']={'exit':1,'oneJsonDocument':True,'noCursorControls':True}
+# Content-driven disambiguation remains before the two-option environment gate.
+company=pathlib.Path('/work/nodes');company.mkdir()
+shutil.copytree('/work/clean/ExampleIssuer',company/'Issuer');shutil.copytree('/work/clean/ExampleIssuer',company/'Notary')
 with (company/'Notary/node.conf').open('a') as conf:conf.write('\nnotary.validating=false\n')
-t=Terminal('multiple-node-selection','clean',node=str(company));t.menu();t.shot('19-node-selection.png');assert 'Non-validating notary' in '\n'.join(t.screen.display);t.choose(2);t.menu();assert 'Notary' in '\n'.join(t.screen.display);t.choose(1);t.menu();t.choose(6);t.finish(1)
+t=Terminal('node-selection','clean',node=str(company));t.menu();assert 'Non-validating notary' in display(t);t.choose(2);t.menu();assert 'Non-validating notary' in display(t);t.choose(2);t.finish(0)
 kit=pathlib.Path('/work/ambiguous-kit');shutil.copytree('/work/clean/upgrade-kit',kit)
-shutil.copyfile(kit/'corda.jar',kit/'alternate-runtime.jar');shutil.copyfile(kit/'transaction-validator.jar',kit/'alternate-tool.jar')
-t=Terminal('artifact-selection','clean',kit=str(kit));t.menu();t.shot('20-artifact-selection.png');t.choose(1);t.menu();t.choose(1);t.menu();t.choose(1);t.menu();t.choose(6);t.finish(1)
-t=Terminal('discovery-exit','clean');t.menu();t.choose(3);t.finish(0);assert b'Assessment was not run' in t.data
-t=Terminal('real-discovery','clean',node='/dist/synthetic/discovery-regression/current-node',kit='/dist/synthetic/discovery-regression/upgrade-kit',env={'LP_HOST_JAVA_VERSION':'1.8.0_242'});t.menu();t.shot('21-real-discovery-summary.png')
-for expected in ('ExampleIssuer','4.11.6','4.12.11','ExampleMixedCaseIssuer','CorDapp JARs  2 current','2 target','Other JARs    1 current','> Continue assessment','Discovery confidence: HIGH'):assert expected in '\n'.join(t.screen.display),expected
-t.choose(2);t.menu();t.shot('22-real-discovery-details.png');assert 'External symlinks skipped: 47' in '\n'.join(t.screen.display);assert 'djvm/link-' not in '\n'.join(t.screen.display)
-t.choose(2);t.menu();assert 'djvm/link-' in '\n'.join(t.screen.display);t.choose(1);t.menu();t.choose(3);t.finish(0)
-# ASCII selection with actual arrow navigation over an SSH-like narrow PTY.
-t=Terminal('ssh-narrow-ascii','clean',cols=36,rows=52,env={'SSH_TTY':'/dev/pts/1','LANG':'C.UTF-8'});t.menu()
-os.write(t.fd,b'\x1b[B');t.until('Up/Down');assert '> Review discovered details' in '\n'.join(t.screen.display)
-os.write(t.fd,b'\x1b[A');t.until('Up/Down');assert '> Continue assessment' in '\n'.join(t.screen.display)
-t.shot('23-ssh-narrow-ascii.png');os.write(t.fd,b'q');t.finish(0)
+shutil.copyfile(kit/'renamed-runtime.bin',kit/'alternate-runtime.jar');shutil.copyfile(kit/'renamed-validator.jar',kit/'alternate-tool.jar')
+t=Terminal('artifact-selection','clean',kit=str(kit));t.menu();t.choose(1);t.menu();t.choose(1);t.menu();t.choose(2);t.finish(0)
+t=Terminal('guided-start','clean',guided=True);t.until('Current node directory:');os.write(t.fd,b'/work/clean/ExampleIssuer\n');t.until('Target upgrade-kit directory:');os.write(t.fd,b'/work/clean/upgrade-kit\n');t.menu();t.choose(2);t.finish(0)
+t=Terminal('guided-cancel','clean',guided=True);t.until('Current node directory:');os.write(t.fd,b'\n');t.finish(0)
+# Explicit TVU cancellation still launches no process and produces no captures.
+clone=pathlib.Path('/work/isolated-copy');shutil.copytree('/work/clean/ExampleIssuer',clone)
+conf=clone/'node.conf';conf.write_text(conf.read_text().replace('database.example/example','disposable.example/validation'))
+shutil.rmtree(clone/'cordapps');shutil.copytree('/work/clean/upgrade-kit/cordapps',clone/'cordapps')
+t=Terminal('tvu-execution-cancel','clean');t.menu();t.choose(1);t.menu();t.choose(1);t.menu();t.choose(2);t.until('Prepared isolated validation-copy directory');os.write(t.fd,str(clone).encode()+b'\n')
+t.until('Confirmation');os.write(t.fd,b'NO\n');t.menu();assert b'TVU execution cancelled' in t.data;t.choose(1);t.menu();t.choose(3);t.finish(1)
+assert not list(pathlib.Path('/work/reports/tvu-execution-cancel').glob('tvu-run-*'))
 shutil.copytree('/work/reports',ROOT/'interactive-artifacts')
 (SHOTS/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (ROOT/'interactive-validation.json').write_text(json.dumps(results,indent=2)+'\n');print(json.dumps(results,indent=2))

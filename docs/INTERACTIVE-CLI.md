@@ -1,25 +1,19 @@
-# Interactive assessment sessions
+# Interactive CLI
 
-Before compatibility analysis, a short discovery gate shows node type, unknown business role, runtime, Java, vendor, schema and target. Choose Continue assessment, Review discovered details or Exit. Ambiguous nodes, configs and runtime/TVU artifacts are selected explicitly. CI remains non-interactive; see UNIVERSAL-DISCOVERY.md for boundaries.
+The normal flow has three layers: Environment, Result, Technical evidence. Discovery happens before deep compatibility analysis. The environment screen shows the chosen node, runtime versions/platforms, current Java evidence, database, primary schema and physical CorDapp counts. Its only actions are Continue and Exit. Ambiguous node/configuration/runtime/TVU choices are resolved explicitly first.
 
-Run `ledger-preflight assess --node /node --upgrade-kit /upgrade-kit` in an SSH or local TTY. The CLI discovers the environment, assesses the inputs, and stays open with actions appropriate to the resulting state. Up/down and Enter select actions; `q` or Ctrl+D leave the menu. On limited terminals, or with `--plain-terminal`, numbered menus provide the same actions. `--non-interactive`, `--json`, redirected input/output and CI skip all prompts and retain readiness exit codes.
+Result actions depend on the current evidence:
 
-The main screen shows node/version, OS/database, schema, CorDapp counts and human-readable TVU state. Analyzer Java and raw state enums are reserved for technical evidence. Legal identity is shown when available from the allowlisted myLegalName field. Menus follow the current assessment. BLOCKED offers Understand the blockers, TVU validation, Reports & R3 Support and Exit. READY FOR TVU offers preparation, guided execution, result import, assessment review, reports and Exit. READY TO UPGRADE offers a change-approval report, evidence package, final assessment review and Exit. Zero-blocker warning/unknown assessments offer assessment review instead of blocker investigation. Returning from a submenu shows compact context; a changed assessment refreshes the summary. Technical evidence is human-readable first, with optional raw JSON. Support ZIP names use the node name and timestamp, with numeric collision suffixes. Submenus expose explanations, all findings, remediation, comparison, TVU readiness/preparation/execution/import, technical reports, sanitized support and generated artifacts.
+| Result | Actions |
+| --- | --- |
+| NOT READY TO UPGRADE | View technical evidence; Create R3 support package; Run again; Exit |
+| READY FOR TVU | TVU instructions; View technical evidence; Exit |
+| READY TO UPGRADE | View upgrade checklist; View technical evidence; Exit |
 
-Target comparison scans the new upgrade kit and compares blocker identities including affected artifacts and JVM symbols. Target artifact overrides, classpath evidence and TVU evidence are reset. Old TVU findings are excluded from resolved/unchanged/new comparison because retiring evidence does not resolve a failure. Each target or TVU import writes a separate report directory; the previous result remains available. The session's exit code reflects its last successfully assessed target.
+Confirmed blockers, unresolved coverage, and required warning reviews all prevent an upgrade recommendation. JSON preserves BLOCKED, UNKNOWN and WARNING separately, with their existing exit codes. The normal screen explains grouped issues using What happened, Why it matters, and What to do. Repeated TVU errors are correlated to exact missing member signatures only when the supplied evidence supports that match.
 
-Technical assessment generates HTML, JSON and complete text immediately. Support packaging uses only generated allowlisted evidence, redacts secrets, hashes entries and reopens/scans the finished temporary ZIP before publishing it. A separate SHA-256 file and explicit safety results accompany READY TO SHARE. View generated artifacts lists reports and packages created in the session. Raw TVU output, private keys, JARs and connection credentials are never included.
+Technical evidence contains runtime manifests, inventories, exact API references, classpath order, schemas/search paths, TVU totals, coverage limits and skipped paths. It also generates complete HTML/JSON/text assessments and lists the generated files. Sanitized support packages contain generated textual evidence only, exclude binaries/keys/keystores, undergo a final ZIP secret scan, and receive an external SHA-256 checksum.
 
-## Approved TVU execution
+TVU instructions describe isolated-copy preparation and allow importing an existing complete run or explicitly approving execution on an isolated node/database copy. The exact command and environment are shown before approval. Static assessment never executes TVU, changes the node, runs SQL, or performs migrations.
 
-Preparation shows current prerequisites and the [official R3 procedure](https://docs.r3.com/en/platform/corda/4.12/enterprise/node/operating/tvu/running-tvu.html). The run action requires an operator-prepared isolated node copy with target CorDapps and legacy dependencies and an explicit, different disposable database URL. It rejects the original node/kit location, symlinks, incomplete archive evidence and differing CorDapp/legacy bytes. It does not create, alter or migrate databases and does not rewrite configuration.
-
-The CLI displays the exact Java argument list, working directory, capture path and execution implications, then requires the literal confirmation `RUN TVU ON COPY`. It invokes the discovered TVU directly, without a shell, with the documented `-b`, `-f` and `-e` options. A different URL cannot prove database isolation: operators must verify the configured connection and trust the supplied TVU. This explicit action runs TVU with the operator's permissions; static assessment itself stays offline.
-
-Console output is privately captured with a 16 MiB limit and a one-hour execution limit. Ctrl+C terminates the session and its TVU process tree. Nonzero exits, interrupted capture or incomplete results cannot establish READY. Complete captured evidence is analyzed and the menu updates. Imports replace the prior run's TVU evidence; only files from the same complete run should be combined. Real licensed TVU behavior still requires validation with the operator's vendor artifacts and isolated database.
-
-## Docker validation and screenshots
-
-`docker build --target build -t ledgerpreflight-build:interactive .` runs unit/integration tests. Build `docker/Dockerfile.terminal-qa` and run it with networking disabled and a workspace `dist` mount to exercise real Ubuntu 22.04 PTYs, arrow selection, numbered fallback, EOF, CI/JSON behavior and terminal restoration. No host runtimes or build tools are required.
-
-The release terminal harness runs actual Ubuntu PTYs and renders their emulator cell buffers with pyte/Pillow. It never recreates CLI output in HTML or edits screenshot text. Raw ANSI transcripts and screenshot hashes accompany the images.
+Selection uses ASCII >. Interactive menus hide the native cursor and restore it in a finally block and shutdown hook. Arrow keys, j/k, Enter and q are supported. Plain-terminal mode uses full numbered labels; CI, JSON and redirected output contain no interactive cursor controls. Abrupt power loss or SIGKILL cannot execute cleanup; standard exit, q, Ctrl+C, SIGTERM and exceptions are covered by terminal validation.
