@@ -43,10 +43,12 @@ class Terminal:
                 return
             self.read(.15)
         raise AssertionError('Missing '+expected+' in '+self.name+'\n'+self.data.decode(errors='replace')[-2500:])
-    def menu(self):self.until('↑/↓ select')
+    def menu(self):
+        self.until('Up/Down');assert '> ' in '\n'.join(self.screen.display)
+        assert not any(g in '\n'.join(self.screen.display) for g in ('❯','□','■','▶'))
     def choose(self,n):
         if n>1:
-            os.write(self.fd,b'\x1b[B'*(n-1));self.until('↑/↓ select')
+            os.write(self.fd,b'\x1b[B'*(n-1));self.until('Up/Down')
         os.write(self.fd,b'\r')
     def shot(self,name):
         lines=self.screen.display
@@ -120,9 +122,14 @@ shutil.copyfile(kit/'corda.jar',kit/'alternate-runtime.jar');shutil.copyfile(kit
 t=Terminal('artifact-selection','clean',kit=str(kit));t.menu();t.shot('20-artifact-selection.png');t.choose(1);t.menu();t.choose(1);t.menu();t.choose(1);t.menu();t.choose(6);t.finish(1)
 t=Terminal('discovery-exit','clean');t.menu();t.choose(3);t.finish(0);assert b'Assessment was not run' in t.data
 t=Terminal('real-discovery','clean',node='/dist/synthetic/discovery-regression/current-node',kit='/dist/synthetic/discovery-regression/upgrade-kit',env={'LP_HOST_JAVA_VERSION':'1.8.0_242'});t.menu();t.shot('21-real-discovery-summary.png')
-for expected in ('ExampleIssuer','4.11.6','4.12.11','ExampleMixedCaseIssuer','3 current','2 target','Discovery confidence: HIGH'):assert expected in '\n'.join(t.screen.display),expected
+for expected in ('ExampleIssuer','4.11.6','4.12.11','ExampleMixedCaseIssuer','CorDapp JARs  2 current','2 target','Other JARs    1 current','> Continue assessment','Discovery confidence: HIGH'):assert expected in '\n'.join(t.screen.display),expected
 t.choose(2);t.menu();t.shot('22-real-discovery-details.png');assert 'External symlinks skipped: 47' in '\n'.join(t.screen.display);assert 'djvm/link-' not in '\n'.join(t.screen.display)
 t.choose(2);t.menu();assert 'djvm/link-' in '\n'.join(t.screen.display);t.choose(1);t.menu();t.choose(3);t.finish(0)
+# ASCII selection with actual arrow navigation over an SSH-like narrow PTY.
+t=Terminal('ssh-narrow-ascii','clean',cols=36,rows=52,env={'SSH_TTY':'/dev/pts/1','LANG':'C.UTF-8'});t.menu()
+os.write(t.fd,b'\x1b[B');t.until('Up/Down');assert '> Review discovered details' in '\n'.join(t.screen.display)
+os.write(t.fd,b'\x1b[A');t.until('Up/Down');assert '> Continue assessment' in '\n'.join(t.screen.display)
+t.shot('23-ssh-narrow-ascii.png');os.write(t.fd,b'q');t.finish(0)
 shutil.copytree('/work/reports',ROOT/'interactive-artifacts')
 (SHOTS/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (ROOT/'interactive-validation.json').write_text(json.dumps(results,indent=2)+'\n');print(json.dumps(results,indent=2))

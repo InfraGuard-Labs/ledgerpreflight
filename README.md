@@ -27,9 +27,10 @@ For manual or offline installation, obtain the Linux tarball and `SHA256SUMS` fr
 
 ```sh
 awk '$2 == "ledger-preflight-0.1.0-linux-x86_64.tar.gz"' SHA256SUMS > package.sha256
-test -s package.sha256 && sha256sum -c package.sha256 && \
-  tar -xzf ledger-preflight-0.1.0-linux-x86_64.tar.gz && \
-  cd ledger-preflight-0.1.0 && ./ledger-preflight --version
+test -s package.sha256 && sha256sum -c package.sha256 || exit 1
+tar -xzf ledger-preflight-0.1.0-linux-x86_64.tar.gz
+cd ledger-preflight-0.1.0
+./ledger-preflight --version
 ```
 
 From that extracted directory, run:
@@ -40,7 +41,7 @@ From that extracted directory, run:
   --upgrade-kit /path/to/upgrade-kit
 ```
 
-Manual tarball commands use `./ledger-preflight`. After installation, add the printed bin directory to PATH to use `ledger-preflight` from other directories.
+**Manual tarball:** use `./ledger-preflight` in the extracted directory. **Installed with install.sh:** add the printed bin directory to PATH, then use `ledger-preflight` from any directory.
 
 The Linux package includes private Java 17. The JAR-only alternative requires an existing Java 17 runtime: verify its entry in `SHA256SUMS`, then run `java -jar ledger-preflight-0.1.0.jar`. Ubuntu 18.04 is the minimum baseline; 20.04, 22.04 and 24.04 are also validated. [Docker usage](docs/USER-GUIDE.md) is available as an alternative.
 
@@ -50,15 +51,17 @@ Follow the [official Corda Enterprise upgrade guide](https://docs.r3.com/en/plat
 
 ```text
 upgrade-kit/
-├── target Corda runtime
+├── target Corda runtime JAR
 ├── target TVU JAR
-├── cordapps/     # rebuilt target CorDapps
+├── cordapps/
+│   ├── rebuilt contract CorDapp
+│   └── rebuilt workflow CorDapp
 └── legacy-jars/  # only when required
 ```
 
-Target TVU is required for TVU readiness, and rebuilt target CorDapps are required. Legacy JARs are optional. Exact names and layout may differ; discovery uses metadata and content.
+Target TVU is needed for TVU readiness, and target CorDapps are needed for application validation. Legacy JARs are optional. Exact filenames are not required: LedgerPreflight identifies supported artifacts from metadata and contents. The current node is analyzed read-only; static assessment needs no database credentials.
 
-Run `ledger-preflight` for guided path entry, or supply paths directly:
+After installation with `install.sh` and PATH setup, run `ledger-preflight` for guided path entry, or supply paths directly (manual extraction uses `./ledger-preflight`):
 
 ```sh
 ledger-preflight assess \

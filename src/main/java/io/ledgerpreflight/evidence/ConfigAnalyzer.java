@@ -89,11 +89,11 @@ public final class ConfigAnalyzer {
             for(String declared:Arrays.asList(schema,current,hibernate))if(declared!=null)declarations.add(identifier(declared));
             if(!searchPath.isEmpty())declarations.add(searchPath.get(0));
             boolean conflict=declarations.stream().distinct().count()>1;
-            boolean unresolvedSchema=issues.stream().anyMatch(i->i.startsWith("Unresolved")&&!i.endsWith("notary")&&!i.endsWith("notary.validating")&&!i.endsWith("myLegalName"));
-            settings.put("schemaDeclarations",Map.of("database.schema",Objects.toString(schema,"Not supplied"),"JDBC currentSchema",Objects.toString(current,"Not supplied"),"Hibernate default_schema",Objects.toString(hibernate,"Not supplied"),"search_path",searchPath));
+            boolean unresolvedSchema=issues.stream().anyMatch(i->i.contains("unsupported expressions")||i.startsWith("Unresolved")&&!i.endsWith("notary")&&!i.endsWith("notary.validating")&&!i.endsWith("myLegalName"));
+            settings.put("schemaDeclarations",Collections.unmodifiableMap(new TreeMap<>(Map.of("database.schema",Objects.toString(schema,"Not supplied"),"JDBC currentSchema",Objects.toString(current,"Not supplied"),"Hibernate default_schema",Objects.toString(hibernate,"Not supplied"),"search_path",searchPath))));
             settings.put("schemaResolution",unresolvedSchema?"UNRESOLVED":conflict?"AMBIGUOUS":declarations.isEmpty()?"DEFAULT_UNVERIFIED":"CONFIGURED");
-            settings.put("effectiveSchema",unresolvedSchema||conflict?"Unknown":declarations.isEmpty()?"Default (not independently established)":declarations.get(0));
-            settings.put("schemaExplanation",unresolvedSchema?"Required schema evidence is unresolved":conflict?"Explicit schema declarations disagree":declarations.isEmpty()?"No explicit schema declaration; database defaults are unverified":"Explicit schema declarations agree");
+            settings.put("effectiveSchema",unresolvedSchema?"Unknown":conflict?"Ambiguous":declarations.isEmpty()?"Default (not independently established)":declarations.get(0));
+            settings.put("schemaExplanation",unresolvedSchema?"Required schema evidence is unresolved":conflict?"Explicit schema declarations disagree":declarations.isEmpty()?"No explicit schema declaration; database defaults are unverified":declarations.size()==1?"One explicit schema declaration; database behavior is unverified":"Explicit schema declarations agree");
             settings.put("schemaConfidence",unresolvedSchema||conflict||declarations.isEmpty()?"UNKNOWN":declarations.size()>1?"HIGH":"MEDIUM");
             if (conflict) issues.add("Schema declarations disagree; verify effective TVU and node schema separately");
             boolean mixed=declarations.stream().anyMatch(d->!d.equals(d.toLowerCase(Locale.ROOT)));

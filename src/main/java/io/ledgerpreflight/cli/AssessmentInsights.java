@@ -23,7 +23,7 @@ public final class AssessmentInsights {
         if(blockers(a).size()>shownBlockers||warnings>shownWarnings)s.append("Showing ").append(shownBlockers).append(" of ").append(blockers(a).size()).append(" blockers · ").append(shownWarnings).append(" of ").append(warnings).append(" warnings\n");
         if(!priority.isEmpty())s.append(blockers(a).isEmpty()?"\nEVIDENCE TO RESOLVE\n":"\nWHAT STOPS THIS UPGRADE\n");
         for(Finding f:priority)s.append("\n").append(f.severity().equals("UNKNOWN")?"? ":"✕ ").append(Reports.findingSummary(f).replaceFirst("^LP-[A-Z0-9-]+ · ","")).append('\n');
-        a.findings().stream().filter(f->f.severity().equals("WARNING")).sorted(Comparator.comparing(f->!f.id().equals("LP-DB-001"))).findFirst().ifPresent(f->s.append("\n! ").append(f.id().equals("LP-DB-001")?"Mixed-case PostgreSQL schema\nTVU schema handling requires validation.":Reports.findingSummary(f).replaceFirst("^LP-[A-Z0-9-]+ · ","")).append('\n'));
+        a.findings().stream().filter(f->f.severity().equals("WARNING")).sorted(Comparator.comparing(f->!f.id().equals("LP-DB-001"))).findFirst().ifPresent(f->s.append("\n! ").append(f.id().equals("LP-DB-001")&&!f.title().contains("unresolved")?"Mixed-case PostgreSQL schema\nTVU schema handling requires validation.":Reports.findingSummary(f).replaceFirst("^LP-[A-Z0-9-]+ · ","")).append('\n'));
         if(blockers(a).size()>shownBlockers||warnings>shownWarnings)s.append("\n").append(blockers(a).size()-shownBlockers).append(" additional blockers and ").append(warnings-shownWarnings).append(" additional warnings are available in full findings.\n");
         if(priority.isEmpty())s.append("\nReview assessment concerns before completing TVU validation.\n");
         return s.toString();
@@ -47,7 +47,7 @@ public final class AssessmentInsights {
         return "LedgerPreflight "+a.productVersion()+"\n────────────────────────────────────────\n\n"+env.path("nodeName").asText("Node not established")+
             (legal.isEmpty()?"":"\n"+legal)+"\n"+a.sourceVersion()+" → "+a.targetVersion()+"\n\n"+os+" · "+db+
             "\nSchema: "+cfg.path("safeSettings").path("effectiveSchema").asText("Not established")+(cfg.path("safeSettings").path("effectiveSchema").asText().equals("Unknown")?" ("+cfg.path("safeSettings").path("schemaExplanation").asText("Evidence not established")+")":"")+
-            "\nCorDapp artifacts: "+Reports.JSON.valueToTree(a.evidence().get("cordapps-current")).size()+" current → "+Reports.JSON.valueToTree(a.evidence().get("cordapps-target")).size()+" target\nTVU: "+tvuState(a)+"\n";
+            "\nCorDapp JARs: "+Reports.JSON.valueToTree(a.evidence().get("cordapps-current")).size()+" current → "+Reports.JSON.valueToTree(a.evidence().get("cordapps-target")).size()+" target\nOther JARs: "+Reports.JSON.valueToTree(a.evidence().get("other-jars-current")).size()+" current → "+Reports.JSON.valueToTree(a.evidence().get("other-jars-target")).size()+" target\nTVU: "+tvuState(a)+"\n";
     }
     private static String tvuState(Assessment a){JsonNode tvu=Reports.JSON.valueToTree(a.evidence().get("tvu-summary"));return tvu.path("completeSuccess").asBoolean()?"Passed":tvu.path("failed").asLong(0)>0?"Failed":"Not completed";}
     public static String tvuReadiness(Assessment a) {
@@ -56,6 +56,7 @@ public final class AssessmentInsights {
     public static String tvuReadiness(Assessment a,java.nio.file.Path explicitTvu) {
         JsonNode gates=Reports.JSON.valueToTree(a.gates()),host=Reports.JSON.valueToTree(a.evidence().get("environment")).path("host");
         boolean tvu=explicitTvu!=null && java.nio.file.Files.isRegularFile(explicitTvu,java.nio.file.LinkOption.NOFOLLOW_LINKS);for(JsonNode artifact:Reports.JSON.valueToTree(a.evidence().get("upgrade-kit")))if(artifact.path("role").asText().equals("TVU"))tvu=true;
+        if(a.findings().stream().anyMatch(f->Set.of("LP-DISCOVERY-002","LP-DISCOVERY-007").contains(f.id())))tvu=false;
         StringBuilder s=new StringBuilder("TVU READINESS\n\nStatic preflight: "+(gates.path("static").asText().equals("PASS")?"Passed":"Review required")+"\nTarget TVU: "+(tvu?"Found for "+a.targetVersion():"Not found in kit; check explicit override")+"\nTarget CorDapps: "+Reports.JSON.valueToTree(a.evidence().get("cordapps-target")).size()+" found\n");
         boolean legacyConcern=a.findings().stream().anyMatch(f->f.category().equals("LEGACY_JARS")&&!f.severity().equals("INFO"));
         s.append("Legacy dependencies: ").append(legacyConcern?"Review required — class shadowing or duplication":"No static conflict found; confirm complete historical dependencies").append("\nCurrent Java: ").append(host.path("currentJava").asText("Not established")).append("\nTarget Java requirement: ").append(host.path("targetRequiredJava").asText("Not established")).append("\nTarget Java preparation: ").append(host.path("targetJavaReadiness").asText().equals("USER_REPORTED_COMPATIBLE")?"Reported compatible; verify on validation copy":"Not independently confirmed").append("\nTVU result: ").append(tvuState(a)).append("\n\nBEFORE RUNNING\n");

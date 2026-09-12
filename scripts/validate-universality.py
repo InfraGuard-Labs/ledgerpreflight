@@ -26,4 +26,21 @@ assess('ambiguous-config',node,expected=4)
 assess('explicit-config',node,extra=['--node-conf',str(node/'node.conf')])
 kit=pathlib.Path('/tmp/arbitrary-kit');shutil.copytree(source/'upgrade-kit',kit);(kit/'corda.jar').rename(kit/'unrelated.jar');(kit/'transaction-validator.jar').rename(kit/'utility.jar')
 assess('nonstandard-artifact-names','/srv/apps/corda/issuer',kit=kit)
+# Mandatory sanitized acceptance gate: real manifest/content structures, no vendor binaries.
+acceptance=r/'synthetic/discovery-regression'
+a=assess('real-style-acceptance',acceptance/'current-node',kit=acceptance/'upgrade-kit',expected=4,env={**os.environ,'LP_HOST_JAVA_VERSION':'1.8.0_242'})
+d=a['evidence']['discovery'];cfg=a['evidence']['schema-analysis']['safeSettings']
+assert (a['sourceVersion'],a['targetVersion'])==('4.11.6','4.12.11')
+assert (d['sourcePlatform'],d['targetPlatform'])==('13','140')
+assert (d['currentCordappJars'],d['targetCordappJars'],d['currentOtherJars'])==(2,2,1)
+assert d['confidence']=='HIGH' and cfg['effectiveSchema']=='ExampleMixedCaseIssuer'
+assert cfg['businessRole']=='Unknown' and a['evidence']['environment']['nodeName']=='ExampleIssuer'
+assert a['evidence']['environment']['host']['currentJava']=='1.8.0_242'
+assert any(f['id']=='LP-INPUT-001' for f in a['findings']) # Excluded symlinks still prevent an unsupported readiness claim.
+for kind,filename,code in [('runtime','corda.jar','LP-DISCOVERY-006'),('tvu','transaction-validator.jar','LP-DISCOVERY-007')]:
+    duplicate=pathlib.Path('/tmp/ambiguous-'+kind);shutil.copytree(source/'upgrade-kit',duplicate)
+    shutil.copyfile(duplicate/filename,duplicate/'second.jar')
+    a=assess('ambiguous-'+kind,source/'current-node',kit=duplicate,expected=4)
+    assert any(f['id']==code for f in a['findings'])
+    if kind=='runtime':assert a['targetVersion']=='unknown'
 (r/'universality-validation.json').write_text(json.dumps(results,indent=2)+'\n');print(json.dumps(results,indent=2))

@@ -22,7 +22,9 @@ public final class BytecodeScanner {
     }
     public record ClassInfo(String name,String superName,List<String> interfaces,int access,int majorVersion,
                             List<Member> members,List<Reference> references) {}
-    public record JarInventory(String path,String sha256,Map<String,String> manifest,Map<String,ClassInfo> classes,List<String> signatureFiles) {}
+    public record JarInventory(String path,String sha256,Map<String,String> manifest,Map<String,ClassInfo> classes,List<String> signatureFiles,List<String> cordappEntrypoints) {
+        public JarInventory(String path,String sha256,Map<String,String> manifest,Map<String,ClassInfo> classes,List<String> signatureFiles){this(path,sha256,manifest,classes,signatureFiles,List.of());}
+    }
     public record ScanIssue(String code,String path,String message) {}
     public record ScanResult(List<JarInventory> jars,List<ScanIssue> issues) {}
     private final Limits limits;
@@ -63,7 +65,7 @@ public final class BytecodeScanner {
     private record Candidate(int version,ClassInfo info) {}
     private void scanArchive(InputStream raw,String label,String hash,int depth,List<JarInventory> jars,List<ScanIssue> issues,Budget budget)throws IOException {
         if(depth>limits.maxDepth())throw new LimitException("Nested archive depth exceeds limit: "+label);
-        Map<String,String> manifest=new TreeMap<>(String.CASE_INSENSITIVE_ORDER);Map<String,List<Candidate>> candidates=new TreeMap<>();List<String> signatures=new ArrayList<>();Set<String> names=new HashSet<>();
+        Map<String,String> manifest=new TreeMap<>(String.CASE_INSENSITIVE_ORDER);Map<String,List<Candidate>> candidates=new TreeMap<>();List<String> signatures=new ArrayList<>(),entrypoints=new ArrayList<>();Set<String> names=new HashSet<>();
         PushbackInputStream peek=new PushbackInputStream(new BufferedInputStream(raw),4);byte[] magic=peek.readNBytes(4);peek.unread(magic);
         if(magic.length!=4||magic[0]!='P'||magic[1]!='K'|| !((magic[2]==3&&magic[3]==4)||(magic[2]==5&&magic[3]==6)))throw new IOException("Invalid ZIP signature");
         try(ZipInputStream zip=new ZipInputStream(peek)) {
@@ -83,6 +85,9 @@ public final class BytecodeScanner {
                     if(data.length>65536)throw new IOException("Version metadata exceeds size limit");
                     Properties properties=new Properties();properties.load(new ByteArrayInputStream(data));
                     for(String key:List.of("Corda-Release-Version","Corda-Platform-Version","Corda-Vendor")){String alias=switch(key){case "Corda-Release-Version"->"releaseVersion";case "Corda-Platform-Version"->"platformVersion";default->"vendor";};String value=properties.getProperty(key,properties.getProperty(alias,properties.getProperty(key.equals("Corda-Release-Version")?"version":key.equals("Corda-Platform-Version")?"platform.version":"vendor")));if(value!=null&&value.length()<=128){mergeMetadata(manifest,key,value.strip());manifest.put("Metadata-Origin",name);}}
+                }else if(Set.of("META-INF/services/net.corda.core.contracts.Contract","META-INF/services/net.corda.core.flows.FlowLogic").contains(name)){
+                    if(data.length>65536)throw new IOException("CorDapp service metadata exceeds size limit");
+                    for(String line:new String(data,java.nio.charset.StandardCharsets.UTF_8).split("\\R")){String provider=line.split("#",2)[0].strip();if(provider.matches("[A-Za-z_$][A-Za-z0-9_$.]*"))entrypoints.add(provider.replace('.','/'));}
                 }else if(lower.endsWith(".jar")){
                     try{validateZipEnd(data);scanArchive(new ByteArrayInputStream(data),label+"!/"+name,hash(new ByteArrayInputStream(data)),depth+1,jars,issues,budget);}
                     catch(LimitException e){throw e;}catch(IOException|RuntimeException e){issues.add(new ScanIssue("LP-INPUT-001",label+"!/"+name,"Cannot inventory nested archive: "+e.getMessage()));}
@@ -108,10 +113,16 @@ public final class BytecodeScanner {
         boolean multi=manifest.entrySet().stream().anyMatch(e->e.getKey().equalsIgnoreCase("Multi-Release")&&e.getValue().equalsIgnoreCase("true"));
         Map<String,ClassInfo> classes=new TreeMap<>();
         candidates.forEach((name,values)->values.stream().filter(c->c.version()==0||multi).max(Comparator.comparingInt(Candidate::version)).ifPresent(c->classes.put(name,c.info())));
-        // Capsule identity may be carried by bundled Corda metadata rather than the outer manifest.
-        for(JarInventory nested:jars)if(nested.path().startsWith(label+"!/"))for(String key:List.of("Corda-Release-Version","Corda-Platform-Version","Corda-Vendor")){if(nested.manifest().containsKey("Metadata-Conflict"))manifest.put("Metadata-Conflict",nested.manifest().get("Metadata-Conflict"));String value=nested.manifest().get(key);if(value!=null){mergeMetadata(manifest,key,value);manifest.putIfAbsent("Metadata-Origin",nested.path());}}
+        // Bundled library versions are fallback evidence, not the capsule's own release identity.
+        boolean ownRelease=List.of("Corda-Release-Version","Corda-Version","Application-Version").stream().anyMatch(manifest::containsKey);
+        boolean ownPlatform=manifest.containsKey("Corda-Platform-Version")||manifest.containsKey("Platform-Version");
+        for(JarInventory nested:jars)if(nested.path().startsWith(label+"!/"))for(String key:List.of("Corda-Release-Version","Corda-Platform-Version","Corda-Vendor")){
+            if(key.equals("Corda-Release-Version")&&ownRelease||key.equals("Corda-Platform-Version")&&ownPlatform)continue;
+            if(nested.manifest().getOrDefault("Metadata-Conflict","").contains(key))manifest.merge("Metadata-Conflict",key,(a,b)->a.contains(b)?a:a+", "+b);
+            String value=nested.manifest().get(key);if(value!=null){mergeMetadata(manifest,key,value);manifest.putIfAbsent("Metadata-Origin",nested.path());}
+        }
         Collections.sort(signatures);
-        jars.add(new JarInventory(label,hash,Collections.unmodifiableMap(manifest),Collections.unmodifiableMap(classes),List.copyOf(signatures)));
+        jars.add(new JarInventory(label,hash,Collections.unmodifiableMap(manifest),Collections.unmodifiableMap(classes),List.copyOf(signatures),entrypoints.stream().filter(classes::containsKey).distinct().sorted().toList()));
     }
     private static void mergeMetadata(Map<String,String> manifest,String key,String value){String previous=manifest.putIfAbsent(key,value);if(previous!=null&&!previous.equals(value)&&key.contains("Version"))manifest.merge("Metadata-Conflict",key,(a,b)->a.contains(b)?a:a+", "+b); }
     public static void validateEntry(String name)throws IOException {

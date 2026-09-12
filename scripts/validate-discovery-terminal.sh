@@ -15,11 +15,11 @@ for locale in C C.UTF-8; do
   grep -q '4.11.6' "$file"
   grep -q '4.12.11' "$file"
   grep -q 'ExampleMixedCaseIssuer' "$file"
-  grep -q '3 current' "$file"
+  grep -q '2 current' "$file"
   grep -q '2 target' "$file"
   grep -q 'Discovery confidence: HIGH' "$file"
-  if [ "$locale" = C ]; then grep -q '> Continue assessment' "$file"; else grep -q '❯ Continue assessment' "$file"; fi
-  ! grep -q '□\|■' "$file"
+  grep -q '> Continue assessment' "$file"
+  ! grep -q '❯\|□\|■\|▶' "$file"
 done
 (sleep 2; printf '3\n'; sleep 2) | env TERM=dumb script -q -e -c "$app assess --node $node --upgrade-kit $kit --plain-terminal --output /tmp/discovery-terminal/plain" /output/discovery-terminal-$VERSION_ID-plain.txt
-printf 'Ubuntu %s: discovery identity and ASCII/Unicode/plain selection passed.\n' "$VERSION_ID"
+printf 'Ubuntu %s: discovery identity and ASCII cursor in C/UTF-8/plain selection passed.\n' "$VERSION_ID"

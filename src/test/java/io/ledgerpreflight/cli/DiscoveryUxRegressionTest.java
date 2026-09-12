@@ -10,11 +10,20 @@ import io.ledgerpreflight.integration.RealDiscoveryRegressionTest;
 class DiscoveryUxRegressionTest {
  @TempDir Path root;
  @Test void skippedPathsAreSummarized(){var paths=java.util.stream.IntStream.range(0,47).mapToObj(i->"Symbolic link outside supplied root skipped: djvm/link-"+i).toList();String text=DiscoverySession.concerns(paths);assertTrue(text.contains("External symlinks skipped: 47"));assertFalse(text.contains("djvm/link"));}
- @Test void cursorUsesAsciiWhenUnicodeIsNotSupported(){assertEquals(">",SessionTerminal.cursor(Map.of("LANG","C","TERM","xterm"),StandardCharsets.US_ASCII));assertEquals(">",SessionTerminal.cursor(Map.of("LANG","en_US.UTF-8","TERM","linux"),StandardCharsets.UTF_8));assertEquals("❯",SessionTerminal.cursor(Map.of("LANG","en_US.UTF-8","TERM","xterm-256color"),StandardCharsets.UTF_8));}
+ @Test void cursorUsesAsciiWhenUnicodeIsNotSupported(){assertEquals(">",SessionTerminal.cursor(Map.of("LANG","C","TERM","xterm"),StandardCharsets.US_ASCII));assertEquals(">",SessionTerminal.cursor(Map.of("LANG","en_US.UTF-8","TERM","linux"),StandardCharsets.UTF_8));assertEquals(">",SessionTerminal.cursor(Map.of("LANG","en_US.UTF-8","TERM","xterm-256color"),StandardCharsets.UTF_8));}
  @Test void discoverySummaryAndDrilldownUseObservedMetadata()throws Exception {
   var f=RealDiscoveryRegressionTest.fixture(root);StringWriter output=new StringWriter();var terminal=new SessionTerminal(new StringReader("2\n2\n1\n3\n"),new PrintWriter(output),false,100);
   assertNull(DiscoverySession.prepare(f.options(false),terminal));String text=output.toString();
-  for(String expected:List.of("ExampleIssuer","4.11.6","4.12.11","ExampleMixedCaseIssuer","3 current → 2 target CorDapp JARs","platform 13","platform 140","External symlinks skipped: 47","View skipped paths","Discovery confidence: HIGH"))assertTrue(text.contains(expected),expected+"\n"+text);
+  for(String expected:List.of("ExampleIssuer","4.11.6","4.12.11","ExampleMixedCaseIssuer","2 current → 2 target","platform 13","platform 140","External symlinks skipped: 47","View skipped paths","Discovery confidence: HIGH"))assertTrue(text.contains(expected),expected+"\n"+text);
   assertTrue(text.contains("djvm/link-0"));
+ }
+ @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+ void ambiguousArtifactsRequireSelection(boolean tvu)throws Exception {
+  var f=RealDiscoveryRegressionTest.fixture(root);Files.copy(f.kit().resolve(tvu?"renamed-validator.jar":"renamed-corda-target.jar"),f.kit().resolve("second.jar"));StringWriter output=new StringWriter();
+  var selected=DiscoverySession.prepare(f.options(false),new SessionTerminal(new StringReader("2\n1\n"),new PrintWriter(output),false,100));assertNotNull(selected);assertEquals("second.jar",(tvu?selected.tvuJar():selected.targetCorda()).getFileName().toString());assertTrue(output.toString().contains(tvu?"Select target TVU artifact":"Select target Corda runtime"));
+ }
+ @Test void coverageConcernsExplainTheirImpactWithoutAnUnexplainedCounter(){
+  var issues=java.util.stream.IntStream.range(0,1015).mapToObj(i->new io.ledgerpreflight.bytecode.BytecodeScanner.ScanIssue("LP-INPUT-001","artifact-"+i,"Malformed class")).toList();var scan=new io.ledgerpreflight.bytecode.BytecodeScanner.ScanResult(List.of(),issues);
+  String text=DiscoverySession.coverage(scan,scan);assertTrue(text.contains("Bytecode scan incomplete"));assertTrue(text.contains("Readiness requires reviewing"));assertFalse(text.contains("1015"));
  }
 }
