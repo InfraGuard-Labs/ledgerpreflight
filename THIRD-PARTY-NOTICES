@@ -1,0 +1,44 @@
+Third-party software included in LedgerPreflight 0.1.0
+
+picocli 4.7.6 — Apache License 2.0 — https://picocli.info/
+Typesafe Config 1.4.3 — Apache License 2.0 — https://github.com/lightbend/config
+Jackson annotations/core/databind 2.18.10 — Apache License 2.0 — https://github.com/FasterXML/jackson
+ASM 9.7.1 — BSD 3-Clause — https://asm.ow2.io/license.html
+
+The complete Apache License 2.0 accompanies this distribution in LICENSE.
+The dependency SBOM identifies the exact resolved components and hashes.
+Build/test tools are not part of the executable runtime distribution.
+
+ASM: a very small and fast Java bytecode manipulation framework
+Copyright (c) 2000-2011 INRIA, France Telecom
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+3. Neither the name of the copyright holders nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+THE POSSIBILITY OF SUCH DAMAGE.
+
+The Linux x86_64 distribution additionally contains an unmodified Eclipse Temurin
+Java17 runtime. Its full upstream licensing and notices are retained in runtime/legal
+and runtime/release identifies the exact distribution. OpenJDK is licensed under
+GPLv2 with the Classpath Exception and additional third-party notices as supplied.
+Matching upstream sources/releases: https://github.com/adoptium/temurin17-binaries
+and https://github.com/adoptium/jdk17u .

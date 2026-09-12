@@ -1,0 +1,13 @@
+services:
+  ledgerpreflight:
+    build: .
+    image: ledgerpreflight:0.1.0
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    volumes:
+      - ./fixtures/generated/node:/node:ro
+      - ./fixtures/generated/kit:/upgrade-kit:ro
+      - ./reports:/reports
+    command: ["assess", "--node", "/node", "--upgrade-kit", "/upgrade-kit", "--output", "/reports", "--offline"]

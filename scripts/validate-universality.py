@@ -1,0 +1,29 @@
+"""Run only inside Docker: exact Linux installation paths and deterministic non-TTY choices."""
+import pathlib,shutil,subprocess,json,os
+r=pathlib.Path('/dist');source=r/'synthetic/clean';out=r/'universality';out.mkdir(exist_ok=True);results={}
+def assess(name,node,kit=None,expected=1,extra=(),env=None):
+    cmd=['java','-jar',str(r/'ledger-preflight-0.1.0.jar'),'assess','--node',str(node),'--upgrade-kit',str(kit or source/'upgrade-kit'),'--output',str(out/name),'--json',*extra]
+    p=subprocess.run(cmd,capture_output=True,env=env,timeout=45)
+    assert p.returncode==expected,(name,p.returncode,p.stderr.decode())
+    a=json.loads(p.stdout);results[name]={'exit':p.returncode,'status':a['status']};return a
+for n,path in enumerate(['/usr/local/corda/node','/opt/company/ledger/node','/srv/apps/corda/issuer']):
+    shutil.copytree(source/'current-node',path);assess('absolute-path-'+str(n+1),path)
+link=pathlib.Path('/srv/linked-node');link.symlink_to('/srv/apps/corda/issuer');assess('symlinked-node',link)
+company=pathlib.Path('/tmp/company');company.mkdir();shutil.copytree(source/'current-node',company/'one');shutil.copytree(source/'current-node',company/'two')
+a=assess('ambiguous-nodes',company,expected=4);assert any(f['id']=='LP-NODE-001' for f in a['findings'])
+node=company/'one'
+for vendor in ('oracle','sqlserver','unknown'):
+    (node/'node.conf').write_text('database.schema=MixedCase\ndatabase.url="jdbc:'+vendor+':example"\n')
+    a=assess('vendor-'+vendor,node);assert not any(f['id']=='LP-DB-001' for f in a['findings'])
+(node/'node.conf').write_text('database.schema=${LP_REQUIRED_SCHEMA}\n')
+assess('unresolved-schema',node,expected=4)
+assess('environment-schema',node,env={**os.environ,'LP_REQUIRED_SCHEMA':'public'})
+(node/'schema.conf').write_text('database.schema=public\n')
+(node/'node.conf').write_text('include "schema.conf"\n')
+assess('relative-include',node)
+(node/'other.conf').write_text('myLegalName="O=Other,L=London,C=GB"\n')
+assess('ambiguous-config',node,expected=4)
+assess('explicit-config',node,extra=['--node-conf',str(node/'node.conf')])
+kit=pathlib.Path('/tmp/arbitrary-kit');shutil.copytree(source/'upgrade-kit',kit);(kit/'corda.jar').rename(kit/'unrelated.jar');(kit/'transaction-validator.jar').rename(kit/'utility.jar')
+assess('nonstandard-artifact-names','/srv/apps/corda/issuer',kit=kit)
+(r/'universality-validation.json').write_text(json.dumps(results,indent=2)+'\n');print(json.dumps(results,indent=2))

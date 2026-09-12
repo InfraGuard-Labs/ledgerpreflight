@@ -1,0 +1,5 @@
+FROM python:3.12-slim
+RUN pip install --no-cache-dir jsonschema==4.23.0
+WORKDIR /qa
+COPY scripts/validate-artifacts.py /qa/validate-artifacts.py
+ENTRYPOINT ["python", "/qa/validate-artifacts.py"]

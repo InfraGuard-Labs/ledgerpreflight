@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<verification-metadata xmlns="https://schema.gradle.org/dependency-verification" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="https://schema.gradle.org/dependency-verification https://schema.gradle.org/dependency-verification/dependency-verification-1.3.xsd">
+   <configuration>
+      <verify-metadata>true</verify-metadata>
+      <verify-signatures>false</verify-signatures>
+   </configuration>
+   <components>
+      <component group="com.fasterxml" name="oss-parent" version="69">
+         <artifact name="oss-parent-69.pom">
+            <sha256 value="3856d584aaa1c8e33ce94c67244f71f6f70538a259ffe8e781761b9faaad875f"/>
+         </artifact>
+      </component>
+      <component group="com.fasterxml.jackson" name="jackson-base" version="2.18.10">
+         <artifact name="jackson-base-2.18.10.pom">
+            <sha256 value="48a438ad93116717138e2bd7ba28ec3c5d844e420a219ff9c0dacf2bdf055b46"/>
+         </artifact>
+      </component>
+      <component group="com.fasterxml.jackson" name="jackson-bom" version="2.18.10">
+         <artifact name="jackson-bom-2.18.10.pom">
+            <sha256 value="d250a834e90595284f5aaf2f33c8c63ff99037791ce331dc5560530c6a5a165a"/>
+         </artifact>
+      </component>
+      <component group="com.fasterxml.jackson" name="jackson-parent" version="2.18.4">
+         <artifact name="jackson-parent-2.18.4.pom">
+            <sha256 value="916e9bbf43fc0994292f3fde2d385764bd21060c60dffe9c695c091978087d00"/>
+         </artifact>
+      </component>
+      <component group="com.fasterxml.jackson.core" name="jackson-annotations" version="2.18.10">
+         <artifact name="jackson-annotations-2.18.10.jar">
+            <sha256 value="67634a683cfb1695e55c78e351c5f38f4de0d8c64ed567419b8fe2d1dc354ada"/>
+         </artifact>
+         <artifact name="jackson-annotations-2.18.10.module">
+            <sha256 value="cb028040220c3dce8fc103a6ddb088c993d85f3fc6eeb5d9f67ba37d89a545b9"/>
+         </artifact>
+      </component>
+      <component group="com.fasterxml.jackson.core" name="jackson-core" version="2.18.10">
+         <artifact name="jackson-core-2.18.10.jar">
+            <sha256 value="e4544eec5754d2dd06c6b16cfc9d2883a523f7177c2429ab04b29ab5fab445c9"/>
+         </artifact>
+         <artifact name="jackson-core-2.18.10.module">
+            <sha256 value="1e9cf14de4a6bfb963d9ac50f1af5e4f912e233ebf6152c40a59e77ed5f2f933"/>
+         </artifact>
+      </component>
+      <component group="com.fasterxml.jackson.core" name="jackson-databind" version="2.18.10">
+         <artifact name="jackson-databind-2.18.10.jar">
+            <sha256 value="ead55a0c649b11af6148a0c097323f5438afc5f563e7139681ad8277fff520bf"/>
+         </artifact>
+         <artifact name="jackson-databind-2.18.10.module">
+            <sha256 value="0a22d7584790aff80699c9fe42e7cc2c8b976475f77a05270de2d0f0edfb7a11"/>
+         </artifact>
+      </component>
+      <component group="com.typesafe" name="config" version="1.4.3">
+         <artifact name="config-1.4.3.jar">
+            <sha256 value="8ada4c185ce72416712d63e0b5afdc5f009c0cdf405e5f26efecdf156aa5dfb6"/>
+         </artifact>
+         <artifact name="config-1.4.3.pom">
+            <sha256 value="b67eafa9dd220ff87d00dba6880083a5296a5e0c6c03103f5d4b8e1da1030ff3"/>
+         </artifact>
+      </component>
+      <component group="info.picocli" name="picocli" version="4.7.6">
+         <artifact name="picocli-4.7.6.jar">
+            <sha256 value="ed441183f309b93f104ca9e071e314a4062a893184e18a3c7ad72ec9cba12ba0"/>
+         </artifact>
+         <artifact name="picocli-4.7.6.pom">
+            <sha256 value="2d2248cccf487ad9ce208dec751745df15cd1e1924a4cc3d36841b5f1990c6fb"/>
+         </artifact>
+      </component>
+      <component group="org.apiguardian" name="apiguardian-api" version="1.1.2">
+         <artifact name="apiguardian-api-1.1.2.jar">
+            <sha256 value="b509448ac506d607319f182537f0b35d71007582ec741832a1f111e5b5b70b38"/>
+         </artifact>
+         <artifact name="apiguardian-api-1.1.2.module">
+            <sha256 value="e08028131375b357d1d28734e9a4fb4216da84b240641cb3ef7e7c7d628223fc"/>
+         </artifact>
+      </component>
+      <component group="org.jacoco" name="org.jacoco.agent" version="0.8.12">
+         <artifact name="org.jacoco.agent-0.8.12.jar">
+            <sha256 value="ab29507b750d325bbaf7ea094860fff26d27170038d8ee5f00c3074489f14637"/>
+         </artifact>
+         <artifact name="org.jacoco.agent-0.8.12.pom">
+            <sha256 value="0f9da994abd9827f957fc1ba7c5bad3fe918f62601c1d743f216b0615efe480e"/>
+         </artifact>
+      </component>
+      <component group="org.jacoco" name="org.jacoco.ant" version="0.8.12">
+         <artifact name="org.jacoco.ant-0.8.12.jar">
+            <sha256 value="43f81e03dd6f5190aecb88a6236b694adade484b0402447c320fc6e94d685f41"/>
+         </artifact>
+         <artifact name="org.jacoco.ant-0.8.12.pom">
+            <sha256 value="0594aa45963cca465e3dd8c8c7e7160b4d2b7db0bf7784a76c6cda35bc0fa033"/>
+         </artifact>
+      </component>
+      <component group="org.jacoco" name="org.jacoco.build" version="0.8.12">
+         <artifact name="org.jacoco.build-0.8.12.pom">
+            <sha256 value="250dcc9a1003e82095933f64869237752f36e70cb8a63f2cdf99b0c9613c09b9"/>
+         </artifact>
+      </component>
+      <component group="org.jacoco" name="org.jacoco.core" version="0.8.12">
+         <artifact name="org.jacoco.core-0.8.12.jar">
+            <sha256 value="fca26db37c0c5fbd5dc4985237eb82866df9799d5082af899475a73f91f5b035"/>
+         </artifact>
+         <artifact name="org.jacoco.core-0.8.12.pom">
+            <sha256 value="aa0b2773786886d51d188d7ed1a43f676efa21278520445bfef0ccb5d8cbe717"/>
+         </artifact>
+      </component>
+      <component group="org.jacoco" name="org.jacoco.report" version="0.8.12">
+         <artifact name="org.jacoco.report-0.8.12.jar">
+            <sha256 value="f9c79ad66a66a0337c57849ad1287a2ab23b9b232d35314443e5ec49e6e3d20f"/>
+         </artifact>
+         <artifact name="org.jacoco.report-0.8.12.pom">
+            <sha256 value="b7abd47a94e297f4befd10ad7aac51484b123e8fcca8e2d514d883e7543c8008"/>
+         </artifact>
+      </component>
+      <component group="org.junit" name="junit-bom" version="5.11.4">
+         <artifact name="junit-bom-5.11.4.module">
+            <sha256 value="a9a4f27be94e99b9d570162d246a80f686d277d5d31aeb5481047cf51daf46e4"/>
+         </artifact>
+         <artifact name="junit-bom-5.11.4.pom">
+            <sha256 value="19d4b747b204805325b6334553296f986562277a4ac1cb5e593a5e4c4f5e4115"/>
+         </artifact>
+      </component>
+      <component group="org.junit.jupiter" name="junit-jupiter" version="5.11.4">
+         <artifact name="junit-jupiter-5.11.4.jar">
+            <sha256 value="aa880e4afba87d447357e4c1fc098c5cb1d200cb9403496c00d3b35a5bd0e8db"/>
+         </artifact>
+         <artifact name="junit-jupiter-5.11.4.module">
+            <sha256 value="a3c353ed7516ae1835eab95a087f4f09a5b0cc7d0b8b039fe77a039b8ab52103"/>
+         </artifact>
+      </component>
+      <component group="org.junit.jupiter" name="junit-jupiter-api" version="5.11.4">
+         <artifact name="junit-jupiter-api-5.11.4.jar">
+            <sha256 value="ab83ef9e51ac4597d59d26b4b58812129550e2f579a404c8af7d09f5ce5b4293"/>
+         </artifact>
+         <artifact name="junit-jupiter-api-5.11.4.module">
+            <sha256 value="a6ea2fefb3aa5868fd7a780ae1da1162e76dda3760b48015c2a419d2372ff3cb"/>
+         </artifact>
+      </component>
+      <component group="org.junit.jupiter" name="junit-jupiter-engine" version="5.11.4">
+         <artifact name="junit-jupiter-engine-5.11.4.jar">
+            <sha256 value="cdf8ac59f3fad774ca738ad03890950eeb91833ef0e8908753177edd26f1581c"/>
+         </artifact>
+         <artifact name="junit-jupiter-engine-5.11.4.module">
+            <sha256 value="db91163a8af005a32798565dd67537725189590deab6da03b31dbdda45686a18"/>
+         </artifact>
+      </component>
+      <component group="org.junit.jupiter" name="junit-jupiter-params" version="5.11.4">
+         <artifact name="junit-jupiter-params-5.11.4.jar">
+            <sha256 value="02a6e015de7ce94ac7f256e7fa05b8091dea861fe79a555a7993313d0f6c7d96"/>
+         </artifact>
+         <artifact name="junit-jupiter-params-5.11.4.module">
+            <sha256 value="58865b8b4b998b9ab19c13f8e413b7e1d4819374dd5df69760c4c0b0bc4e9895"/>
+         </artifact>
+      </component>
+      <component group="org.junit.platform" name="junit-platform-commons" version="1.11.4">
+         <artifact name="junit-platform-commons-1.11.4.jar">
+            <sha256 value="9edd969b0d0670c54105bc91ae79bd1c6f503e12115faba82073b84c86bbc334"/>
+         </artifact>
+         <artifact name="junit-platform-commons-1.11.4.module">
+            <sha256 value="0b9e2625c8f468b3cd4132cc0a805f89fe41f852d1adfff75f3eb1465ca1cb6b"/>
+         </artifact>
+      </component>
+      <component group="org.junit.platform" name="junit-platform-engine" version="1.11.4">
+         <artifact name="junit-platform-engine-1.11.4.jar">
+            <sha256 value="b1dd998f64f9acadc15966d9cd3d08074662677b3e390f0a38fcbf0bb4c72330"/>
+         </artifact>
+         <artifact name="junit-platform-engine-1.11.4.module">
+            <sha256 value="bf6ce1fb5951dc6c7de36adeef6aeaf78ef82d63831c5ccebce388da9fc5fe25"/>
+         </artifact>
+      </component>
+      <component group="org.junit.platform" name="junit-platform-launcher" version="1.11.4">
+         <artifact name="junit-platform-launcher-1.11.4.jar">
+            <sha256 value="d7430bd029e7fcced53ee445e4d2d1a8a1e043ea4c4df43b6335a857f79761ae"/>
+         </artifact>
+         <artifact name="junit-platform-launcher-1.11.4.module">
+            <sha256 value="60c4533209ba587b1cda7d72c087f351a3231f9b91c94f3f76394b0e22341cc4"/>
+         </artifact>
+      </component>
+      <component group="org.opentest4j" name="opentest4j" version="1.3.0">
+         <artifact name="opentest4j-1.3.0.jar">
+            <sha256 value="48e2df636cab6563ced64dcdff8abb2355627cb236ef0bf37598682ddf742f1b"/>
+         </artifact>
+         <artifact name="opentest4j-1.3.0.module">
+            <sha256 value="48bf1d6c8b5dc94f74652bd17900f654deb714350248cf5e8fca27b9090c8e0d"/>
+         </artifact>
+      </component>
+      <component group="org.ow2" name="ow2" version="1.5.1">
+         <artifact name="ow2-1.5.1.pom">
+            <sha256 value="321ddbb7ee6fe4f53dea6b4cd6db74154d6bfa42391c1f763b361b9f485acf05"/>
+         </artifact>
+      </component>
+      <component group="org.ow2.asm" name="asm" version="9.7">
+         <artifact name="asm-9.7.jar">
+            <sha256 value="adf46d5e34940bdf148ecdd26a9ee8eea94496a72034ff7141066b3eea5c4e9d"/>
+         </artifact>
+         <artifact name="asm-9.7.pom">
+            <sha256 value="de00115f1d84f3a0b2ee3a4b6f6192d066f86d185d67b9d1522f2c80feac5f00"/>
+         </artifact>
+      </component>
+      <component group="org.ow2.asm" name="asm" version="9.7.1">
+         <artifact name="asm-9.7.1.jar">
+            <sha256 value="8cadd43ac5eb6d09de05faecca38b917a040bb9139c7edeb4cc81c740b713281"/>
+         </artifact>
+         <artifact name="asm-9.7.1.pom">
+            <sha256 value="7229b03b30a73ee91008072d9e4569a51d8547fae8c50f527841aef4c1b0baa8"/>
+         </artifact>
+      </component>
+      <component group="org.ow2.asm" name="asm-bom" version="9.7">
+         <artifact name="asm-bom-9.7.pom">
+            <sha256 value="8c8651f3be043b3578dd28a15c0161861b15eb039b7f5247679c0cc0dbf07787"/>
+         </artifact>
+      </component>
+      <component group="org.ow2.asm" name="asm-commons" version="9.7">
+         <artifact name="asm-commons-9.7.jar">
+            <sha256 value="389bc247958e049fc9a0408d398c92c6d370c18035120395d4cba1d9d9304b7a"/>
+         </artifact>
+         <artifact name="asm-commons-9.7.pom">
+            <sha256 value="5acee3ee7252ed90b8074c755d022787499a95fafff98ac4a685107c4da409b4"/>
+         </artifact>
+      </component>
+      <component group="org.ow2.asm" name="asm-tree" version="9.7">
+         <artifact name="asm-tree-9.7.jar">
+            <sha256 value="62f4b3bc436045c1acb5c3ba2d8ec556ec3369093d7f5d06c747eb04b56d52b1"/>
+         </artifact>
+         <artifact name="asm-tree-9.7.pom">
+            <sha256 value="a34ea1e3e4128c01038db43c6976e88c779cf5af84b0505da266dfe6965668ec"/>
+         </artifact>
+      </component>
+   </components>
+</verification-metadata>

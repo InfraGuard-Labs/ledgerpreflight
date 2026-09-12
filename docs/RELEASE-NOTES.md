@@ -1,0 +1,20 @@
+# LedgerPreflight 0.1.0 (unreleased)
+
+Independent, offline Corda upgrade preflight and compatibility analysis. No public release or tag has been created. Real isolated validation with licensed Corda artifacts is pending.
+
+Implemented: standalone Linux x86_64 distribution with a private Java17 runtime, plus JAR-only and portable Java distributions, non-root Docker image, smart assess and diagnostic commands, exact JVM descriptor analysis, internal API and legacy shadowing checks, HOCON/schema evidence, TVU summary/detail correlation, versioned rules and additive user packs, offline HTML/JSON reports, and sanitized support bundles.
+
+Validation: The exact passing test count is recorded in validation-summary.json, with zero failures/errors/skips. Clean Dockerfile build and all development tooling run in Docker. Network-disabled read-only runtime replay returns BLOCKED; clean static fixture returns READY FOR TVU (exit1); successful full TVU fixture returns READY TO UPGRADE (exit0). Non-root UID/GID10001, deterministic repeat apart from timestamps, report JSON schema, support ZIP allowlist/secret checks, tarball/checksums, and desktop/mobile browser rendering passed. Separate test/coverage reports and benchmark.csv contain actual evidence.
+
+The synthetic 4.11.9 -> 4.12.11 replay reports missing exact InternalUtils.sum descriptor, internal API risk, mixed-case schema risk, shadowed legacy shim, and failed TVU. It preserves the evidence distinction: 650 processed, 449 succeeded, 201 failures reported, three supplied detailed records sharing one root cause. These synthetic version labels are not claims about actual vendor patch behavior.
+
+Runtime dependency SBOM: six JVM libraries plus the bundled Eclipse Temurin Java17 runtime, CycloneDX1.5. Containerized Trivy SBOM scan after updating Jackson to2.18.10 reports zero known vulnerabilities at scan time. No proprietary artifacts or private customer data are bundled. See vulnerability-scan.json for database timestamp and evidence; this is not a guarantee against undisclosed vulnerabilities.
+
+Users provide a current-node directory, a prepared target upgrade-kit directory, and optionally TVU logs/error ZIPs and verifier classpath/class-loading evidence. Use read-only input mounts. LedgerPreflight does not modify nodes, contact databases or execute analyzed classes. It does not replace R3's upgrade guide or certify an environment. Final READY requires successful required TVU evidence and no unresolved findings.
+
+Known limits: no real licensed Corda Enterprise validation was performed; fixtures are synthetic. Reflection, generic/annotation-only dependencies, dynamic classloaders, complete JVM module/access checks and historical attachment coverage remain outside static certainty. Signer file metadata does not cryptographically validate trusted signer continuity; such findings stay warnings. Supplied logs are not cryptographically bound to the current artifact hashes/database snapshot. Operators must establish evidence provenance and perform lower-environment and production change validation. Unknown layouts, incomplete bytecode and unsupported version families cannot establish readiness.
+
+Reproduction: scripts/validate.sh inside the build container, then scripts/validate-ubuntu.sh in clean Ubuntu containers. Artifacts: ledger-preflight-0.1.0.jar, ledger-preflight-0.1.0.tar.gz, SHA256SUMS, sbom.cdx.json, example-report.html/json, test-report/, coverage/, validation-summary.json. Docker image: ledgerpreflight:0.1.0 (Ubuntu22.04 x86_64).
+
+
+Linux compatibility: bundled launcher passed on clean Ubuntu18.04,20.04,22.04 and24.04 x86_64 with no systemJava installed, networking disabled, read-only roots and non-root execution. A separate Ubuntu18.04 fixture with real Java8 passed assessment using privateJava17 while the defaultJava8 remained unchanged. ExecutionOS, currentJava, analyzerJava, targetrequiredJava and declaredtarget readiness are separate evidence. HTML is a secondary executive change-review artifact: first-screen blockers/actions, with deep evidence collapsed.

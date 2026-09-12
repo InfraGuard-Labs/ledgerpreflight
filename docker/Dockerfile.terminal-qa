@@ -1,0 +1,4 @@
+FROM ledgerpreflight-build:0.1.0
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pyte python3-pil fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+COPY scripts/validate-interactive.py /qa/validate-interactive.py
+ENTRYPOINT ["python3", "/qa/validate-interactive.py"]

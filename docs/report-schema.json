@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LedgerPreflight assessment v1",
+  "type": "object",
+  "required": ["schemaVersion","productVersion","status","sourceVersion","targetVersion","findings","evidence","ledgerPreflightVersion","assessmentId","timestamp","currentNode","upgradeKit","gates","artifacts","hashes"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {"const":"1"},
+    "productVersion": {"type":"string"},
+    "status": {"enum":["BLOCKED","WARNING","UNKNOWN","READY FOR TVU","READY TO UPGRADE"]},
+    "ledgerPreflightVersion":{"type":"string"}, "assessmentId":{"type":"string"}, "timestamp":{"type":"string","format":"date-time"}, "currentNode":{"type":"object"}, "upgradeKit":{"type":"array"}, "gates":{"type":"object"}, "artifacts":{"type":"object"}, "hashes":{"type":"object"},
+    "sourceVersion": {"type":"string"},
+    "targetVersion": {"type":"string"},
+    "findings": {"type":"array","items":{"type":"object","required":["id","title","severity","category","status","confidence","source","affectedArtifact","technicalEvidence","impact","explanation","recommendedNextAction","documentationReference"],"properties":{"id":{"type":"string"},"technicalEvidence":{"type":"array","items":{"type":"string"}},"severity":{"enum":["BLOCKED","WARNING","UNKNOWN","INFO","ERROR"]}}}},
+    "evidence": {"type":"object"}
+  }
+}

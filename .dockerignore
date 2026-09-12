@@ -1,0 +1,17 @@
+.git
+.gradle
+build
+dist
+reports
+fixtures/private
+
+local-fixtures
+private-fixtures
+real-validation
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*

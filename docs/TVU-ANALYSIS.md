@@ -1,0 +1,11 @@
+# TVU analysis
+
+Supply console output, validator logs, error ZIPs or a directory containing evidence from one run. LedgerPreflight parses the evidence; it does not run TVU, connect to the database or change any runtime files. The [Running the TVU guide](https://docs.r3.com/en/platform/corda/4.12/enterprise/node/operating/tvu/running-tvu.html) describes the required prepared environment and supported schema versions.
+
+Counts for expected, processed, succeeded and failed transactions must form a consistent complete result before supplied validation can count as successful. Missing totals, partial execution, inconsistent summaries, malformed archives and error records prevent a success claim. Supply the complete log when a short snippet is insufficient.
+
+The analyzer recognizes linkage errors, missing classes/fields, schema validation, verifier, deserialization and unknown failure evidence. It groups matching error records instead of repeating stack traces. Total summary failures are separate from supplied detailed records. For example, 201 failures reported with three same-cause detail files means three supplied records share the cause; it does not prove all 201 share it. Repeated copies should not be treated as independently established affected transactions.
+
+Normal node startup and TVU database validation are separate execution paths. A Hibernate missing-table message is evidence that TVU validation failed, not evidence that the actual table is absent. Mixed-case schema, JDBC currentSchema, Hibernate override and search_path evidence need consistent interpretation. Confirm the effective schema on a controlled copy and obtain supported operational guidance before applying changes. The public rules do not claim a patch-specific vendor defect.
+
+TVU summaries are local evidence, not authenticated attestations. Preserve their provenance, the exact target artifact hashes and the covered snapshot. New transactions after validation, omitted historical artifacts, the wrong target environment, or incomplete network-node validation can invalidate an operational conclusion even if supplied totals look successful. The final change process remains responsible for those boundaries.
