@@ -12,22 +12,26 @@ public class SessionTerminal {
     private final PrintWriter out;
     private boolean advanced;
     private final int width;
+    private String cursor="❯";
     public SessionTerminal(Reader input, PrintWriter out, boolean advanced, int width) {
         this.input=input; this.out=out; this.advanced=advanced; this.width=Math.max(30,Math.min(100,width));
     }
     public static SessionTerminal system(PrintWriter out, boolean plain) {
-        return new SessionTerminal(new InputStreamReader(System.in,StandardCharsets.UTF_8),out,
+        var terminal=new SessionTerminal(new InputStreamReader(System.in,StandardCharsets.UTF_8),out,
             !plain && System.console()!=null && System.getenv("TERM")!=null && !System.getenv("TERM").equals("dumb"),columns());
+        terminal.cursor=cursor(System.getenv(),java.nio.charset.Charset.defaultCharset());return terminal;
     }
+    static String cursor(Map<String,String> env,java.nio.charset.Charset charset){String locale=env.getOrDefault("LC_ALL",env.getOrDefault("LC_CTYPE",env.getOrDefault("LANG",""))).toUpperCase(Locale.ROOT);return !"linux".equals(env.get("TERM"))&&locale.contains("UTF")&&charset.newEncoder().canEncode("❯")?"❯":">";}
     private static int columns() {
-        try { String[] size=stty("size").strip().split(" "); return Integer.parseInt(size[size.length-1]); }
+        try { String[] size=stty("size").strip().split(" "); int columns=Integer.parseInt(size[size.length-1]);return columns>0?columns:76; }
         catch(Exception e){return 76;}
     }
     public static String safe(String text) {
         return Sanitizer.redact(text).replaceAll("[\\p{Cntrl}&&[^\\n\\t]]","").replaceAll("[\\u202a-\\u202e\\u2066-\\u2069]","");
     }
     public void text(String text) {
-        for(String line:safe(text).split("\n",-1)) {
+        String display=safe(text);if(cursor.equals(">"))display=display.replace("─","-").replace("→","->").replace("…","...").replace("·","|").replace("✓","+").replace("✕","x").replace("×","x");
+        for(String line:display.split("\n",-1)) {
             while(line.length()>width) { int at=line.lastIndexOf(' ',width);if(at<1)at=width;out.println(line.substring(0,at));line=line.substring(at).stripLeading(); }
             out.println(line);
         }
@@ -71,8 +75,8 @@ public class SessionTerminal {
     private void draw(String title,List<String> labels,int selected) {
         // Redraw only this menu, leaving assessment and explanations in scrollback.
         out.print("\r\u001b[J");out.println(safe(title));
-        for(int i=0;i<labels.size();i++){String s=safe(labels.get(i));out.println((i==selected?"❯ ":"  ")+(s.length()>width-3?s.substring(0,width-4)+"…":s));}
-        out.print("↑/↓ select · Enter open · q back\u001b["+(labels.size()+1)+"A\r");out.flush();
+        for(int i=0;i<labels.size();i++){String s=safe(labels.get(i));out.println((i==selected?cursor+" ":"  ")+(s.length()>width-3?s.substring(0,width-4)+"…":s));}
+        out.print((cursor.equals(">")?"Up/Down select | Enter open | q back":"↑/↓ select · Enter open · q back")+"\u001b["+(labels.size()+1)+"A\r");out.flush();
     }
     private static String stty(String...args)throws Exception {
         List<String> command=new ArrayList<>(List.of("/bin/stty"));command.addAll(List.of(args));

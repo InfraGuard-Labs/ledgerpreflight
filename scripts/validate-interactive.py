@@ -119,6 +119,10 @@ kit=pathlib.Path('/work/ambiguous-kit');shutil.copytree('/work/clean/upgrade-kit
 shutil.copyfile(kit/'corda.jar',kit/'alternate-runtime.jar');shutil.copyfile(kit/'transaction-validator.jar',kit/'alternate-tool.jar')
 t=Terminal('artifact-selection','clean',kit=str(kit));t.menu();t.shot('20-artifact-selection.png');t.choose(1);t.menu();t.choose(1);t.menu();t.choose(1);t.menu();t.choose(6);t.finish(1)
 t=Terminal('discovery-exit','clean');t.menu();t.choose(3);t.finish(0);assert b'Assessment was not run' in t.data
+t=Terminal('real-discovery','clean',node='/dist/synthetic/discovery-regression/current-node',kit='/dist/synthetic/discovery-regression/upgrade-kit',env={'LP_HOST_JAVA_VERSION':'1.8.0_242'});t.menu();t.shot('21-real-discovery-summary.png')
+for expected in ('ExampleIssuer','4.11.6','4.12.11','ExampleMixedCaseIssuer','3 current','2 target','Discovery confidence: HIGH'):assert expected in '\n'.join(t.screen.display),expected
+t.choose(2);t.menu();t.shot('22-real-discovery-details.png');assert 'External symlinks skipped: 47' in '\n'.join(t.screen.display);assert 'djvm/link-' not in '\n'.join(t.screen.display)
+t.choose(2);t.menu();assert 'djvm/link-' in '\n'.join(t.screen.display);t.choose(1);t.menu();t.choose(3);t.finish(0)
 shutil.copytree('/work/reports',ROOT/'interactive-artifacts')
 (SHOTS/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (ROOT/'interactive-validation.json').write_text(json.dumps(results,indent=2)+'\n');print(json.dumps(results,indent=2))

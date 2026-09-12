@@ -46,8 +46,8 @@ public final class AssessmentInsights {
         String legal=cfg.path("safeSettings").path("myLegalName").asText("");
         return "LedgerPreflight "+a.productVersion()+"\n────────────────────────────────────────\n\n"+env.path("nodeName").asText("Node not established")+
             (legal.isEmpty()?"":"\n"+legal)+"\n"+a.sourceVersion()+" → "+a.targetVersion()+"\n\n"+os+" · "+db+
-            "\nSchema: "+cfg.path("safeSettings").path("effectiveSchema").asText("Not established")+
-            "\nCorDapps: "+Reports.JSON.valueToTree(a.evidence().get("cordapps-current")).size()+" current → "+Reports.JSON.valueToTree(a.evidence().get("cordapps-target")).size()+" target\nTVU: "+tvuState(a)+"\n";
+            "\nSchema: "+cfg.path("safeSettings").path("effectiveSchema").asText("Not established")+(cfg.path("safeSettings").path("effectiveSchema").asText().equals("Unknown")?" ("+cfg.path("safeSettings").path("schemaExplanation").asText("Evidence not established")+")":"")+
+            "\nCorDapp artifacts: "+Reports.JSON.valueToTree(a.evidence().get("cordapps-current")).size()+" current → "+Reports.JSON.valueToTree(a.evidence().get("cordapps-target")).size()+" target\nTVU: "+tvuState(a)+"\n";
     }
     private static String tvuState(Assessment a){JsonNode tvu=Reports.JSON.valueToTree(a.evidence().get("tvu-summary"));return tvu.path("completeSuccess").asBoolean()?"Passed":tvu.path("failed").asLong(0)>0?"Failed":"Not completed";}
     public static String tvuReadiness(Assessment a) {

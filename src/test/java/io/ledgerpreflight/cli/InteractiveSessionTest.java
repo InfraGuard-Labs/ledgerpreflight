@@ -61,7 +61,7 @@ class InteractiveSessionTest {
     @Test void terminalStripsEscapeAndDirectionalInjection(){assertFalse(SessionTerminal.safe("\u001b[2J\u202eevil").contains("\u001b"));assertFalse(SessionTerminal.safe("\u202eevil").contains("\u202e"));}
     @Test void legalIdentityAndEnvironmentAreDiscovered()throws Exception {
         var fixture=SyntheticFixtureFactory.create(root.resolve("identity"),false);Files.writeString(fixture.node().resolve("node.conf"),"\nmyLegalName=\"O=Example,L=London,C=GB\"\n",StandardOpenOption.APPEND);
-        String header=AssessmentInsights.header(new AssessmentService().assess(fixture.options(false)));assertTrue(header.contains("O=Example"));assertFalse(header.contains("Analyzer:"));assertTrue(header.contains("CorDapps:"));assertTrue(header.contains("PostgreSQL"));
+        String header=AssessmentInsights.header(new AssessmentService().assess(fixture.options(false)));assertTrue(header.contains("O=Example"));assertFalse(header.contains("Analyzer:"));assertTrue(header.contains("CorDapp artifacts:"));assertTrue(header.contains("PostgreSQL"));
     }
     @Test void nonTtyJsonRemainsOneJsonDocument()throws Exception {
         var fixture=SyntheticFixtureFactory.create(root.resolve("json"),false);var cmd=Main.command();StringWriter out=new StringWriter();cmd.setOut(new PrintWriter(out));

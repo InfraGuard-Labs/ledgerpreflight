@@ -29,14 +29,34 @@ For manual or offline installation, obtain the Linux tarball and `SHA256SUMS` fr
 awk '$2 == "ledger-preflight-0.1.0-linux-x86_64.tar.gz"' SHA256SUMS > package.sha256
 test -s package.sha256 && sha256sum -c package.sha256 && \
   tar -xzf ledger-preflight-0.1.0-linux-x86_64.tar.gz && \
-  cd ledger-preflight-0.1.0 && ./ledger-preflight
+  cd ledger-preflight-0.1.0 && ./ledger-preflight --version
 ```
+
+From that extracted directory, run:
+
+```sh
+./ledger-preflight assess \
+  --node /path/to/current-node \
+  --upgrade-kit /path/to/upgrade-kit
+```
+
+Manual tarball commands use `./ledger-preflight`. After installation, add the printed bin directory to PATH to use `ledger-preflight` from other directories.
 
 The Linux package includes private Java 17. The JAR-only alternative requires an existing Java 17 runtime: verify its entry in `SHA256SUMS`, then run `java -jar ledger-preflight-0.1.0.jar`. Ubuntu 18.04 is the minimum baseline; 20.04, 22.04 and 24.04 are also validated. [Docker usage](docs/USER-GUIDE.md) is available as an alternative.
 
 ## Run
 
 Follow the [official Corda Enterprise upgrade guide](https://docs.r3.com/en/platform/corda/4.12/enterprise/upgrade-guide.html) far enough to prepare a separate target kit: target runtime, matching TVU and target CorDapps, plus `legacy-jars` if required. You need read access to the current node and kit, and a separate writable report directory. TVU logs/error ZIPs and classpath evidence are optional inputs.
+
+```text
+upgrade-kit/
+├── target Corda runtime
+├── target TVU JAR
+├── cordapps/     # rebuilt target CorDapps
+└── legacy-jars/  # only when required
+```
+
+Target TVU is required for TVU readiness, and rebuilt target CorDapps are required. Legacy JARs are optional. Exact names and layout may differ; discovery uses metadata and content.
 
 Run `ledger-preflight` for guided path entry, or supply paths directly:
 
