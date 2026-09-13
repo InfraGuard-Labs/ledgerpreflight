@@ -2,6 +2,7 @@ package io.ledgerpreflight.bytecode;
 
 import io.ledgerpreflight.evidence.SafeInputs;
 import io.ledgerpreflight.core.ManifestMetadata;
+import io.ledgerpreflight.core.Discovery;
 import org.objectweb.asm.*;
 import java.io.*;
 import java.nio.file.*;
@@ -13,13 +14,19 @@ import static io.ledgerpreflight.bytecode.BytecodeScanner.*;
 
 /** Required-owner lookup with an independent budget; unrelated class bodies are never parsed. */
 public final class TargetedRuntimeLookup {
-    public record Artifact(Path path,String label,String expectedSha256) {
+    public enum Role {RUNTIME,VERIFIER,SUPPORTING,LEGACY}
+    public enum Scope {ALL,NODE_RUNTIME,VERIFIER}
+    public enum ContextPresence {PRESENT,ABSENT,UNKNOWN}
+    public record Artifact(Path path,String label,String expectedSha256,Role role) {
         public Artifact(Path path,String label){this(path,label,"");}
-        public Artifact {Objects.requireNonNull(path);Objects.requireNonNull(label);expectedSha256=Objects.requireNonNullElse(expectedSha256,"");}
+        public Artifact(Path path,String label,String expectedSha256){this(path,label,expectedSha256,Role.RUNTIME);}
+        public Artifact {Objects.requireNonNull(path);Objects.requireNonNull(label);expectedSha256=Objects.requireNonNullElse(expectedSha256,"");Objects.requireNonNull(role);}
     }
     public enum State {FOUND,ABSENT,INCOMPLETE,AMBIGUOUS}
-    public record Result(State state,ClassInfo info,List<String> origins,String detail) {
-        public Result {origins=List.copyOf(origins);}
+    public record Result(State state,ClassInfo info,List<String> origins,String detail,
+                         String winningOrigin,List<String> shadowedOrigins,String precedenceEvidence) {
+        public Result(State state,ClassInfo info,List<String> origins,String detail){this(state,info,origins,detail,"",List.of(),"");}
+        public Result {origins=List.copyOf(origins);shadowedOrigins=List.copyOf(shadowedOrigins);}
     }
     public record Limits(long maxArchiveBytes,long maxNestedBytes,long maxReadBytes,int maxEntries,
                          int maxDepth,int maxNestedArchives,int maxOwners,int maxClassBytes,
@@ -32,25 +39,77 @@ public final class TargetedRuntimeLookup {
     private record Candidate(int version,ZipEntry entry) {}
     private static final class BudgetExceeded extends IOException {BudgetExceeded(String message){super(message);}}
     private static final class SignatureExceeded extends RuntimeException {SignatureExceeded(String message){super(message);}}
+    private record Definition(ClassInfo info,String origin,String component) {}
     private static final class Pending {
-        ClassInfo info;final List<String> origins=new ArrayList<>();String failure;int definitions;
-        void found(ClassInfo value,String origin){definitions++;if(origins.size()<8)origins.add(origin);if(info==null)info=value;}
+        final List<Definition> definitions=new ArrayList<>();String failure;
+        void found(ClassInfo value,String origin,String component){if(definitions.size()<32)definitions.add(new Definition(value,origin,component));else failure="Required duplicate-definition retention limit reached";}
     }
     private final List<Artifact> artifacts;
     private final Limits limits;
+    private final Scope scope;
+    private List<String> provenClasspathOrder;
+    private Map<String,String> selectedClassSources=Map.of();
+    private final Set<String> verifierComponents=new TreeSet<>();
+    public record Component(String label,Role role) {}
+    private final Map<String,Role> components=new TreeMap<>();
+    private boolean contextInspected;
+    private String contextFailure;
     private final Map<String,Result> cache=new TreeMap<>();
     private final Map<Path,Stamp> stamps=new HashMap<>();
     private final Set<Path> verified=new HashSet<>();
+    private final Set<String> nestedComponents=new HashSet<>();
+    private record Dependencies(List<String> locations,boolean limited) {}
+    private final Map<String,Dependencies> declaredDependencies=new HashMap<>();
+    private final Set<String> activeComponents=new HashSet<>();
+    private final Set<String> unresolvedDeclaringComponents=new HashSet<>();
+    private long dependencyTextBytes;
+    private boolean unresolvedDependencies;
     private long bytesRead,signatureBytes,started;
-    private int entries,nested;
+    private int entries;
     private String invalidated;
 
     public TargetedRuntimeLookup(List<Artifact> artifacts){this(artifacts,Limits.defaults());}
     public TargetedRuntimeLookup(List<Artifact> artifacts,int javaFeature){this(artifacts,Limits.defaults().forJava(javaFeature));}
     public TargetedRuntimeLookup(List<Artifact> artifacts,Limits limits){
+        this(artifacts,limits,Scope.ALL,List.of());
+    }
+    /** Ordering is accepted only as exact artifact/component labels already bound to this context. */
+    public TargetedRuntimeLookup(List<Artifact> artifacts,Limits limits,Scope scope,List<String> provenClasspathOrder){
         this.limits=Objects.requireNonNull(limits);
+        this.scope=Objects.requireNonNull(scope);
+        this.provenClasspathOrder=List.copyOf(provenClasspathOrder);
         this.artifacts=artifacts.stream().sorted(Comparator.comparing(Artifact::label).thenComparing(a->a.path().toString())).limit(257).toList();
         if(artifacts.size()>256)invalidated="Required runtime artifact count limit reached";
+        if(provenClasspathOrder.size()>256||provenClasspathOrder.stream().anyMatch(s->s==null||s.length()>2048))invalidated="Required classpath proof limit reached";
+    }
+
+    /** Detect an optional bundled verifier without requiring broad bytecode indexing. */
+    public ContextPresence contextPresence(){
+        if(scope!=Scope.VERIFIER)return artifacts.isEmpty()?ContextPresence.ABSENT:ContextPresence.PRESENT;
+        if(!contextInspected){
+            contextInspected=true;if(started==0)started=System.nanoTime();
+            contextFailure=scan(artifacts.stream().filter(a->a.role()==Role.RUNTIME||a.role()==Role.VERIFIER).toList(),Map.of(),false);
+        }
+        if(!verifierComponents.isEmpty())return ContextPresence.PRESENT;
+        return invalidated!=null||contextFailure!=null?ContextPresence.UNKNOWN:ContextPresence.ABSENT;
+    }
+    public boolean hasVerifierContext(){return contextPresence()!=ContextPresence.ABSENT;}
+    public boolean contextComplete(){contextPresence();return invalidated==null&&contextFailure==null;}
+    public List<String> verifierComponents(){contextPresence();return List.copyOf(verifierComponents);}
+    public List<Component> components(){
+        if(!contextInspected){contextInspected=true;if(started==0)started=System.nanoTime();contextFailure=scan(artifacts,Map.of(),false);}
+        return components.entrySet().stream().map(e->new Component(e.getKey(),e.getValue())).toList();
+    }
+    public void setProvenClasspathOrder(List<String> order){
+        if(!cache.isEmpty())throw new IllegalStateException("Classpath proof must be bound before required owners are resolved");
+        if(order.size()>256||order.stream().anyMatch(s->s==null||s.length()>2048))throw new IllegalArgumentException("Required classpath proof limit reached");
+        provenClasspathOrder=List.copyOf(order);
+    }
+    /** Sources are exact bound context component labels; an empty label retains unresolved evidence. */
+    public void setSelectedClassSources(Map<String,String> sources){
+        if(!cache.isEmpty())throw new IllegalStateException("Class-load proof must be bound before required owners are resolved");
+        if(sources.size()>limits.maxOwners()||sources.entrySet().stream().anyMatch(e->!validOwner(e.getKey())||e.getValue()==null||e.getValue().length()>2048)||sources.entrySet().stream().mapToLong(e->2L*(e.getKey().length()+e.getValue().length())+128).sum()>limits.maxSignatureBytes())throw new IllegalArgumentException("Required class-load proof limit reached");
+        selectedClassSources=Map.copyOf(sources);
     }
 
     public Result lookup(String owner){
@@ -73,12 +132,29 @@ public final class TargetedRuntimeLookup {
             pending.put(owner,new Pending());
         }
         if(pending.isEmpty())return;
-        String failure=null;
+        List<Artifact> primary=scope==Scope.ALL?artifacts:artifacts.stream().filter(a->scope==Scope.NODE_RUNTIME?a.role()==Role.RUNTIME:a.role()==Role.RUNTIME||a.role()==Role.VERIFIER||a.role()==Role.LEGACY).toList();
+        String failure=primary.isEmpty()?"No selected runtime artifacts were supplied":scan(primary,pending,false);
+        Map<String,Pending> fallback=new TreeMap<>();
+        for(var item:pending.entrySet()){
+            Result result=select(item.getKey(),item.getValue(),failure,false);
+            if(scope!=Scope.ALL&&result.state()==State.ABSENT)fallback.put(item.getKey(),new Pending());
+            cache.put(item.getKey(),result);
+        }
+        List<Artifact> supporting=artifacts.stream().filter(a->a.role()==Role.SUPPORTING).toList();
+        if(!fallback.isEmpty()&&!supporting.isEmpty()){
+            failure=scan(supporting,fallback,true);
+            for(var item:fallback.entrySet())cache.put(item.getKey(),select(item.getKey(),item.getValue(),failure,true));
+        }
+        for(String owner:pending.keySet())if(cache.get(owner).state()==State.ABSENT&&selectedClassSources.containsKey(owner))cache.put(owner,incomplete("Supplied class-load source could not be confirmed in this execution context"));
+    }
+
+    private String scan(List<Artifact> selected,Map<String,Pending> pending,boolean fallback){
+        if(invalidated!=null)return invalidated;
+        activeComponents.clear();unresolvedDeclaringComponents.clear();unresolvedDependencies=false;
         try{
             tick();verifySnapshots();
-            if(artifacts.isEmpty())throw new IOException("No selected runtime artifacts were supplied");
             Set<Path> physical=new HashSet<>();
-            for(Artifact artifact:artifacts){
+            for(Artifact artifact:selected){
                 Path path=artifact.path().toAbsolutePath().normalize();
                 if(!physical.add(path))continue;
                 SafeInputs.checkPath(path);Stamp before=stamp(path);
@@ -90,25 +166,89 @@ public final class TargetedRuntimeLookup {
                     if(!hash(path).equalsIgnoreCase(artifact.expectedSha256()))throw new IOException("Selected runtime hash differs from discovery evidence");
                     verified.add(path);
                 }
-                search(path,artifact.label(),0,pending);
+                boolean active=scope!=Scope.VERIFIER||artifact.role()==Role.VERIFIER||artifact.role()==Role.LEGACY||fallback;
+                search(path,artifact.label(),0,pending,active,artifact.role());
             }
             verifySnapshots();
-        }catch(IOException|RuntimeException e){failure=Objects.toString(e.getMessage(),"Required runtime lookup could not complete");}
-        for(var item:pending.entrySet()){
-            Pending value=item.getValue();Result result;
-            if(value.definitions>1)result=new Result(State.AMBIGUOUS,null,value.origins,"Multiple supplied components define this owner; class selection is unproven");
-            else if(failure!=null||value.failure!=null)result=new Result(State.INCOMPLETE,null,value.origins,failure!=null?failure:value.failure);
-            else if(value.info!=null)result=new Result(State.FOUND,value.info,value.origins,"Required owner found uniquely after complete targeted lookup");
-            else result=new Result(State.ABSENT,null,List.of(),"Required owner absent after complete targeted lookup of supplied runtime artifacts");
-            cache.put(item.getKey(),result);
-        }
+            if(scope!=Scope.ALL)for(String component:activeComponents){
+                Dependencies dependencies=declaredDependencies.get(component);
+                if(dependencies==null)continue;
+                if(dependencies.limited())unresolvedDeclaringComponents.add(component);
+                for(String dependency:dependencies.locations())if(!activeComponents.contains(relativeDependency(component,dependency)))unresolvedDeclaringComponents.add(component);
+            }
+            unresolvedDependencies=!unresolvedDeclaringComponents.isEmpty();
+            return null;
+        }catch(IOException|RuntimeException e){return Objects.toString(e.getMessage(),"Required runtime lookup could not complete");}
     }
 
-    private void search(Path file,String label,int depth,Map<String,Pending> pending)throws IOException {
+    private Result select(String owner,Pending value,String failure,boolean fallback){
+        List<String> origins=value.definitions.stream().map(Definition::origin).sorted().toList();
+        if(failure!=null||value.failure!=null)return new Result(State.INCOMPLETE,null,origins,failure!=null?failure:value.failure);
+        if(value.definitions.isEmpty())return unresolvedDependencies?new Result(State.INCOMPLETE,null,List.of(),"Required owner lookup is incomplete because a declared execution-context classpath dependency could not be inspected"):new Result(State.ABSENT,null,List.of(),"Required owner absent after complete targeted lookup of the selected execution context");
+        Definition winner=value.definitions.get(0);String proof=fallback?"Selected runtime owner is absent after complete lookup; supporting dependency supplies this owner":"Selected execution context contains one definition after complete targeted lookup";
+        Definition loaded=null;
+        if(selectedClassSources.containsKey(owner)){
+            String source=selectedClassSources.get(owner);
+            List<Definition> candidates=value.definitions.stream().filter(d->!source.isBlank()&&(d.component().equals(source)||d.component().startsWith(source+"!/"))).toList();
+            if(candidates.size()!=1)return new Result(State.INCOMPLETE,null,origins,"Supplied class-load source does not uniquely identify a definition in this execution context");
+            loaded=candidates.get(0);
+        }
+        if(value.definitions.size()>1){
+            int minimum=Integer.MAX_VALUE;Set<Integer> ranks=new HashSet<>();boolean ordered=true;
+            for(Definition definition:value.definitions){
+                int rank=rank(definition.component());
+                if(rank<0||!ranks.add(rank))ordered=false;
+                if(rank>=0&&rank<minimum){minimum=rank;winner=definition;}
+            }
+            if(!ordered&&loaded==null)return new Result(State.AMBIGUOUS,null,origins,"Multiple components define this owner in the same execution context; class selection is unproven");
+            if(ordered&&loaded!=null&&!loaded.equals(winner))return new Result(State.INCOMPLETE,null,origins,"Supplied class-load source contradicts the supplied classpath order in this execution context");
+            if(loaded!=null){winner=loaded;proof="Supplied class-load evidence identifies this exact component in the selected execution context";}
+            else proof="Exact supplied classpath order selects this component before every other definition in the same execution context";
+        }else if(loaded!=null)proof="Supplied class-load evidence agrees with the unique definition in the selected execution context";
+        if(loaded==null)for(String declaring:unresolvedDeclaringComponents)if(!declaring.equals(winner.component())){
+            int winningRank=rank(winner.component()),declaringRank=rank(declaring);
+            if(winningRank<0||declaringRank<0||winningRank>=declaringRank)return new Result(State.INCOMPLETE,null,origins,"An unresolved declared classpath dependency could precede the candidate owner in this execution context");
+        }
+        if(loaded==null&&unresolvedDeclaringComponents.contains(winner.component()))proof="Owner is defined in the declaring component before its unresolved manifest Class-Path dependencies";
+        String winning=winner.origin();List<String> shadowed=origins.stream().filter(s->!s.equals(winning)).toList();
+        return new Result(State.FOUND,winner.info(),List.of(winning),proof,winning,shadowed,proof);
+    }
+
+    private int rank(String component){
+        int found=-1;Set<String> matched=new HashSet<>();
+        for(int i=0;i<provenClasspathOrder.size();i++){
+            String entry=provenClasspathOrder.get(i);
+            if(component.equals(entry)||component.startsWith(entry+"!/")){
+                if(!matched.add(entry))return -1;
+                if(found<0)found=i;
+            }
+        }
+        return found;
+    }
+
+    private void search(Path file,String label,int depth,Map<String,Pending> pending,boolean active,Role inheritedRole)throws IOException {
         tick();if(depth>limits.maxDepth())throw new BudgetExceeded("Required nested runtime depth limit reached");
         try(ZipFile zip=ArchiveSafety.open(file,limits.maxEntries())){
+            Map<String,String> manifest=manifest(zip);
+            // Artifact roles identify execution boundaries; the requested owner's package never does.
+            String declaredRole=Discovery.role(new JarInventory("component","",manifest,Map.of(),List.of(),List.of()));
+            boolean declaredLaunch=List.of("Main-Class","Application-Class","Start-Class","Application-ID").stream().anyMatch(key->!manifest.getOrDefault(key,"").isBlank());
+            boolean inferredVerifier=declaredRole.equals("VERIFIER")||!declaredLaunch&&zip.getEntry("net/corda/verifier/Main.class")!=null;
+            // A selected physical node remains the authority even if its archive also ships
+            // a verifier entry point. Only nested applications need inferred role boundaries.
+            boolean verifierRoot=depth==0?inheritedRole==Role.VERIFIER:inferredVerifier;
+            Role componentRole=verifierRoot?Role.VERIFIER:inheritedRole;
+            if(!components.containsKey(label)){reserve(80,label);components.put(label,componentRole);}
+            if(verifierRoot)verifierComponents.add(label);
+            if(scope==Scope.NODE_RUNTIME&&componentRole==Role.VERIFIER)return;
+            if(scope==Scope.VERIFIER&&componentRole==Role.VERIFIER)active=true;
+            if(scope==Scope.VERIFIER&&provenClasspathOrder.contains(label))active=true;
+            if(scope!=Scope.ALL&&active){
+                activeComponents.add(label);
+                if(!declaredDependencies.containsKey(label))declaredDependencies.put(label,dependencies(zip));
+            }
             Set<String> names=new HashSet<>();Map<String,Candidate> candidates=new TreeMap<>();
-            boolean multi=multiRelease(zip);
+            boolean multi="true".equalsIgnoreCase(manifest.get("Multi-Release"));
             for(var enumeration=zip.entries();enumeration.hasMoreElements();){
                 ZipEntry entry=enumeration.nextElement();tick();if(++entries>limits.maxEntries())throw new BudgetExceeded("Required archive entry count limit reached");
                 String name=entry.getName();validateEntry(name);
@@ -123,7 +263,9 @@ public final class TargetedRuntimeLookup {
                 }
                 if(logical.endsWith(".class")){
                     String owner=logical.substring(0,logical.length()-6);
-                    if(pending.containsKey(owner)){
+                    String loaded=selectedClassSources.get(owner);
+                    boolean loadedHere=scope==Scope.VERIFIER&&loaded!=null&&!loaded.isBlank()&&(label.equals(loaded)||label.startsWith(loaded+"!/"));
+                    if((active||loadedHere)&&pending.containsKey(owner)){
                         Candidate prior=candidates.get(owner);if(prior==null||version>prior.version())candidates.put(owner,new Candidate(version,entry));
                     }
                 }
@@ -136,7 +278,7 @@ public final class TargetedRuntimeLookup {
                     try(InputStream in=zip.getInputStream(entry)){bytes=read(in,entry,limits.maxClassBytes());}
                     ClassInfo info=parse(bytes,item.getKey());
                     String origin=label+"!/"+entry.getName();reserve(128,origin);
-                    value.found(info,origin);
+                    value.found(info,origin,label);
                 }catch(BudgetExceeded e){throw e;}
                 catch(IOException|RuntimeException e){value.failure="Required class could not be inspected: "+Objects.toString(e.getMessage(),"Malformed class");}
                 catch(StackOverflowError e){value.failure="Required class nesting exceeded parser stack capacity";}
@@ -145,27 +287,65 @@ public final class TargetedRuntimeLookup {
             for(var enumeration=zip.entries();enumeration.hasMoreElements();){
                 ZipEntry entry=enumeration.nextElement();String name=entry.getName();
                 if(entry.isDirectory()||!name.toLowerCase(Locale.ROOT).endsWith(".jar"))continue;
-                tick();if(++nested>limits.maxNestedArchives())throw new BudgetExceeded("Required nested archive count limit reached");
+                tick();String nestedLabel=label+"!/"+name;
+                if(!nestedComponents.contains(nestedLabel)){if(nestedComponents.size()>=limits.maxNestedArchives())throw new BudgetExceeded("Required nested archive count limit reached");nestedComponents.add(nestedLabel);}
                 if(depth>=limits.maxDepth())throw new BudgetExceeded("Required nested runtime depth limit reached");
                 checkExpandedEntry(entry,limits.maxNestedBytes());
                 Path temporary=Files.createTempFile("ledger-preflight-required-",".archive",PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
                 try{
                     try(InputStream in=zip.getInputStream(entry);OutputStream out=Files.newOutputStream(temporary)){copy(in,out,entry,limits.maxNestedBytes());}
-                    search(temporary,label+"!/"+name,depth+1,pending);
+                    search(temporary,label+"!/"+name,depth+1,pending,active,componentRole);
                 }finally{Files.deleteIfExists(temporary);}
             }
         }
     }
 
-    private boolean multiRelease(ZipFile zip)throws IOException {
-        ZipEntry entry=zip.getEntry("META-INF/MANIFEST.MF");if(entry==null)return false;
+    /** Inspect only bounded manifest main headers; never follow a declared URL or external path. */
+    private Dependencies dependencies(ZipFile zip)throws IOException {
+        ZipEntry entry=zip.getEntry("META-INF/MANIFEST.MF");if(entry==null)return new Dependencies(List.of(),false);
+        ByteArrayOutputStream value=new ByteArrayOutputStream();boolean keep=false,limited=false,seen=false;long total=0;
+        try(InputStream input=zip.getInputStream(entry);BufferedInputStream in=new BufferedInputStream(input,8192)){
+            while(true){
+                ByteArrayOutputStream line=new ByteArrayOutputStream();int c;
+                while((c=in.read())!=-1&&c!='\n'){charge(1);if(++total>8L*1024*1024||line.size()>=65536)return new Dependencies(List.of(),true);line.write(c);}
+                if(c=='\n'){charge(1);total++;}
+                byte[] bytes=line.toByteArray();int length=bytes.length;if(length>0&&bytes[length-1]=='\r')length--;
+                if(length==0)break;
+                if(bytes[0]==' '){
+                    if(keep){if(value.size()+length-1>16384)limited=true;else if(!limited)value.write(bytes,1,length-1);}
+                }else{
+                    int colon=0;while(colon<length&&bytes[colon]!=':')colon++;
+                    keep=colon<length&&new String(bytes,0,colon,java.nio.charset.StandardCharsets.US_ASCII).equalsIgnoreCase("Class-Path");
+                    if(keep){if(seen||length-colon-2>16384)limited=true;else if(colon+2<=length)value.write(bytes,colon+2,length-colon-2);seen=true;}
+                }
+                if(c==-1)break;
+            }
+        }
+        if(limited)return new Dependencies(List.of(),true);
+        String text=value.toString(java.nio.charset.StandardCharsets.UTF_8).strip();if(text.isEmpty())return new Dependencies(List.of(),false);
+        String[] locations=text.split("\\s+");if(locations.length>256||Arrays.stream(locations).anyMatch(s->s.length()>2048)||dependencyTextBytes+2L*text.length()>256*1024)return new Dependencies(List.of(),true);
+        dependencyTextBytes+=2L*text.length();return new Dependencies(List.of(locations),false);
+    }
+    private static String relativeDependency(String component,String dependency){
+        if(dependency.isEmpty()||dependency.startsWith("/")||dependency.contains(":")||dependency.contains("\\")||dependency.contains("%")||dependency.contains("*")||dependency.contains("?")||dependency.endsWith("/"))return "";
+        int boundary=component.lastIndexOf("!/");String capsule=boundary<0?"":component.substring(0,boundary+2),path=component.substring(boundary<0?0:boundary+2);
+        int slash=path.lastIndexOf('/');String relative=(slash<0?"":path.substring(0,slash+1))+dependency;
+        Deque<String> parts=new ArrayDeque<>();for(String part:relative.split("/")){
+            if(part.equals("..")){if(parts.isEmpty())return "";parts.removeLast();}
+            else if(!part.isEmpty()&&!part.equals("."))parts.addLast(part);
+        }
+        return capsule+String.join("/",parts);
+    }
+
+    private Map<String,String> manifest(ZipFile zip)throws IOException {
+        ZipEntry entry=zip.getEntry("META-INF/MANIFEST.MF");if(entry==null)return Map.of();
         // Signed per-entry sections are irrelevant to version selection. The shared parser
         // bounds main headers and their continuations without expanding the whole manifest.
         try(InputStream in=new FilterInputStream(zip.getInputStream(entry)){
             @Override public int read()throws IOException {int value=super.read();if(value!=-1)charge(1);return value;}
             @Override public int read(byte[] data,int offset,int length)throws IOException {int count=in.read(data,offset,length);if(count>0)charge(count);return count;}
         }){
-            return "true".equalsIgnoreCase(ManifestMetadata.read(in).get("Multi-Release"));
+            return ManifestMetadata.read(in);
         }
     }
     private ClassInfo parse(byte[] bytes,String owner)throws IOException {

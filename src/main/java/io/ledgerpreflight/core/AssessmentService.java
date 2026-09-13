@@ -74,16 +74,30 @@ public final class AssessmentService {
         progress.accept("Comparing JVM APIs…");
         CompatibilityAnalyzer analyzer=new CompatibilityAnalyzer();
         List<JarInventory> historical=oldApps;
-        List<TargetedRuntimeLookup.Artifact> sourceArtifacts=lookupArtifacts(options.node(),currentIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN","LEGACY");
-        List<TargetedRuntimeLookup.Artifact> targetArtifacts=lookupArtifacts(options.kit(),targetIdentity,options.targetCorda()==null?new String[]{"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN"}:new String[]{"RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN"});
-        if(options.targetCorda()!=null)targetArtifacts.addAll(lookupArtifacts(options.targetCorda(),runtimeIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN"));
-        var currentLookup=new TargetedRuntimeLookup(sourceArtifacts,targetedLimits.forJava(currentJavaFeature(host,active.selected())));
-        var targetLookup=new TargetedRuntimeLookup(targetArtifacts,targetedLimits.forJava(17));
-        var required=new RequiredSymbolAnalyzer().analyze(historical,currentLookup,targetLookup);
+        List<TargetedRuntimeLookup.Artifact> sourceArtifacts=lookupArtifacts(options.node(),currentIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","SHELL","UNKNOWN");
+        List<TargetedRuntimeLookup.Artifact> targetArtifacts=lookupArtifacts(options.kit(),targetIdentity,options.targetCorda()==null?new String[]{"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","SHELL","UNKNOWN"}:new String[]{"RUNTIME_LIBRARY","VERIFIER","DRIVER","SHELL","UNKNOWN"});
+        if(options.targetCorda()!=null)targetArtifacts.addAll(lookupArtifacts(options.targetCorda(),runtimeIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","SHELL","UNKNOWN"));
+        var currentLookup=new TargetedRuntimeLookup(sourceArtifacts,targetedLimits.forJava(currentJavaFeature(host,active.selected())),TargetedRuntimeLookup.Scope.NODE_RUNTIME,List.of());
+        var targetLookup=new TargetedRuntimeLookup(targetArtifacts,targetedLimits.forJava(17),TargetedRuntimeLookup.Scope.NODE_RUNTIME,List.of());
+        List<TargetedRuntimeLookup.Artifact> verifierArtifacts=new ArrayList<>(targetArtifacts);
+        if(options.legacyJars()==null)verifierArtifacts.addAll(lookupArtifacts(options.kit(),targetIdentity,"LEGACY"));
+        else for(var artifact:lookupArtifacts(options.legacyJars(),identityScanner.scan(options.legacyJars()),"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","SHELL","UNKNOWN","LEGACY","CORDAPP","SUPPORT"))verifierArtifacts.add(new TargetedRuntimeLookup.Artifact(artifact.path(),artifact.label(),artifact.expectedSha256(),TargetedRuntimeLookup.Role.LEGACY));
+        var verifierLookup=new TargetedRuntimeLookup(verifierArtifacts,targetedLimits.forJava(17),TargetedRuntimeLookup.Scope.VERIFIER,List.of());
+        var verifierPresence=verifierLookup.contextPresence();
+        List<String> componentLabels=new ArrayList<>(verifierLookup.components().stream().map(TargetedRuntimeLookup.Component::label).toList());
+        verifierArtifacts.forEach(a->componentLabels.add(a.label()));
+        var ordering=ClasspathEvidence.bind(options.verifierClasspath(),componentLabels);
+        verifierLookup.setProvenClasspathOrder(ordering.components());verifierLookup.setSelectedClassSources(ordering.selectedClassSources());
+        VerifierScope verifierScope=VerifierScope.inspect(historical);
+        boolean checkVerifier=verifierPresence!=TargetedRuntimeLookup.ContextPresence.ABSENT;
+        var required=new RequiredSymbolAnalyzer().analyze(historical,currentLookup,targetLookup,checkVerifier?verifierLookup:null,verifierScope);
         addCompatibility(findings,required.findings(),"current/historical");
-        // Use required-owner signatures even when an unrelated broad capsule scan was partial.
-        List<JarInventory> targetProof=preferTargeted(runtimes,required.targetClasses());
-        ClasspathEvidence.Result classpath=ClasspathEvidence.read(options.verifierClasspath(),targetProof,legacy);
+        if(checkVerifier&&!verifierScope.complete())findings.add(f("LP-ANALYSIS-LIMIT","Additional compatibility analysis is incomplete","UNKNOWN","API_COMPATIBILITY",List.of("Historical verifier applicability could not be completely established within bounded analysis"),"Some historical verifier dependencies remain unresolved","Complete analysis of the active historical CorDapps before upgrading."));
+        // Only selected definitions from the applicable context enter remediation analysis.
+        // Cross-context copies must never re-enter a flattened duplicate-class pool here.
+        List<JarInventory> targetProof=legacyRuntimeProof(checkVerifier?verifierLookup:targetLookup,checkVerifier?required.verifierClasses():required.targetClasses(),legacy,findings);
+        boolean ordered=ordering.runtimePrecedesLegacy(targetProof,legacy);
+        ClasspathEvidence.Result classpath=checkVerifier?new ClasspathEvidence.Result(ordered,ordered?"HIGH":"POTENTIAL",ordering.components(),ordering.observations(),ordering.selectedClassSources()):ClasspathEvidence.read(options.verifierClasspath(),targetProof,legacy);
         addCompatibility(findings,analyzer.analyze(List.of(),targetProof,legacy,classpath.runtimePrecedenceProven()),"legacy remediation");
         ConfigAnalyzer.ConfigEvidence config;
         Path conf=selectedConf;
@@ -117,7 +131,8 @@ public final class AssessmentService {
         for(RuleFinding r:engine.evaluate(facts))findings.add(new Finding(r.id(),r.title(),r.severity(),r.category(),r.status(),r.confidence(),r.source(),r.affectedArtifact(),r.evidence(),r.impact(),r.explanation(),r.nextAction(),r.documentationReference()));
         compareCorDapps(findings,Discovery.select(currentIdentity,"CORDAPP","LEGACY_CONTRACT"),Discovery.select(appIdentity,"CORDAPP"));
         Map<String,Object> evidence=new TreeMap<>();evidence.put("node-discovery",discovered);evidence.put("environment",Map.of("nodeName",Discovery.displayName(config.safeSettings(),options.node().toAbsolutePath().normalize().getFileName().toString()),"current",Discovery.inventory(currentIdentity),"sourceVersion",sourceVersion,"targetVersion",targetVersion,"offline",true,"host",host,"rulePackVersion",RuleEngine.PACK_VERSION));evidence.put("upgrade-kit",Discovery.inventory(targetIdentity));evidence.put("cordapps-current",Discovery.select(currentIdentity,"CORDAPP","LEGACY_CONTRACT").stream().map(j->Map.of("path",j.path(),"sha256",j.sha256())).toList());evidence.put("cordapps-target",Discovery.select(appIdentity,"CORDAPP").stream().map(j->Map.of("path",j.path(),"sha256",j.sha256())).toList());var runtimeDelta=analyzer.compare(analysis(current,currentIdentity,"RUNTIME","RUNTIME_LIBRARY"),runtimes);evidence.put("runtime-api-delta",runtimeDelta);evidence.put("internal-api-usage",findings.stream().filter(f->f.category().equals("INTERNAL_API")).toList());evidence.put("legacy-jars-analysis",findings.stream().filter(f->f.category().equals("LEGACY_JARS")).toList());evidence.put("classpath-analysis",classpath);evidence.put("schema-analysis",config);evidence.put("tvu-summary",tvuEvidence);evidence.put("sanitized-node.conf",config.sanitizedConfig());
-        evidence.put("required-symbol-resolution",Map.of("complete",required.complete()&&currentConsumers.issues().isEmpty(),"symbols",required.symbols(),"scope","Active current CorDapp external references","lookupLimits",targetedLimits));
+        evidence.put("required-symbol-resolution",Map.of("complete",required.complete()&&currentConsumers.issues().isEmpty()&&(!checkVerifier||verifierScope.complete()),"symbols",required.symbols(),"scope","Active current CorDapp external references","lookupLimits",targetedLimits));
+        evidence.put("execution-contexts",Map.of("currentNode",contextArtifacts(sourceArtifacts),"targetNode",contextArtifacts(targetArtifacts),"targetVerifierPresence",verifierPresence,"targetVerifierComponents",verifierLookup.verifierComponents(),"verifierApplicableSourceClasses",verifierScope.classCount(),"verifierScopeComplete",verifierScope.complete(),"supportingDependencyPolicy","Fallback only after the selected context completely proves the owner absent; never merge class members","verifierClasspath",ordering));
         evidence.put("current-runtime-selection",active.evidence());evidence.put("tvu-evidence-supplied",!options.tvuResults().isEmpty());
         evidence.put("discovery",Discovery.model(currentIdentity,targetIdentity,Discovery.select(currentIdentity,"RUNTIME"),Discovery.select(runtimeIdentity,"RUNTIME"),tvu,Discovery.select(appIdentity,"CORDAPP"),config.safeSettings()));
         evidence.put("other-jars-current",Discovery.otherJars(currentIdentity).stream().map(JarInventory::path).toList());
@@ -140,20 +155,33 @@ public final class AssessmentService {
         List<TargetedRuntimeLookup.Artifact> result=new ArrayList<>();Path base=root.toRealPath();boolean single=Files.isRegularFile(base);Path boundary=single?base.getParent():base;
         for(JarInventory jar:Discovery.topLevel(Discovery.select(identity,roles))){
             Path path=single?base:base.resolve(jar.path());
-            if(!jar.path().contains("!/")){Path real=path.toRealPath();if(!real.startsWith(boundary))throw new IOException("Runtime lookup path escapes supplied root");result.add(new TargetedRuntimeLookup.Artifact(real,jar.path(),jar.sha256()));}
+            if(!jar.path().contains("!/")){Path real=path.toRealPath();if(!real.startsWith(boundary))throw new IOException("Runtime lookup path escapes supplied root");TargetedRuntimeLookup.Role role=switch(Discovery.role(jar)){case "RUNTIME"->TargetedRuntimeLookup.Role.RUNTIME;case "VERIFIER"->TargetedRuntimeLookup.Role.VERIFIER;case "LEGACY"->TargetedRuntimeLookup.Role.LEGACY;default->TargetedRuntimeLookup.Role.SUPPORTING;};result.add(new TargetedRuntimeLookup.Artifact(real,jar.path(),jar.sha256(),role));}
         }
         return result;
+    }
+    private static List<Map<String,String>> contextArtifacts(List<TargetedRuntimeLookup.Artifact> artifacts){return artifacts.stream().map(a->Map.of("artifact",a.label(),"role",a.role().name(),"sha256",a.expectedSha256())).toList();}
+    /** Remediation is an independent question even when current source analysis is incomplete. */
+    private static List<JarInventory> legacyRuntimeProof(TargetedRuntimeLookup lookup,List<JarInventory> required,List<JarInventory> legacy,List<Finding> findings){
+        Map<String,JarInventory> selected=new TreeMap<>();
+        for(var jar:required)for(String owner:jar.classes().keySet())selected.put(owner,jar);
+        Set<String> owners=new TreeSet<>();boolean limited=false;
+        for(var jar:legacy)for(String owner:new TreeSet<>(jar.classes().keySet())){
+            if(owners.size()>=4096&&!owners.contains(owner)){limited=true;break;}owners.add(owner);
+        }
+        lookup.prefetch(owners);List<String> unresolved=new ArrayList<>();
+        for(String owner:owners){
+            var result=lookup.lookup(owner);
+            if(result.state()==TargetedRuntimeLookup.State.FOUND){String origin=result.winningOrigin();if(origin.isEmpty()&&!result.origins().isEmpty())origin=result.origins().get(0);selected.put(owner,new JarInventory(origin,"",Map.of(),Map.of(owner,result.info()),List.of()));}
+            else if(result.state()!=TargetedRuntimeLookup.State.ABSENT&&unresolved.size()<8)unresolved.add(owner+": "+result.detail());
+        }
+        if(limited||!unresolved.isEmpty())findings.add(f("LP-LEGACY-CONTEXT","Legacy class selection remains unresolved","UNKNOWN","LEGACY_JARS",limited?List.of("Legacy owner lookup limit reached"):unresolved,"The effective verifier dependency selection has not been established","Supply complete bounded verifier and legacy classpath evidence before relying on compatibility dependencies."));
+        return selected.values().stream().distinct().filter(j->legacy.stream().noneMatch(l->j.path().equals(l.path())||j.path().startsWith(l.path()+"!/"))).toList();
     }
     private static int currentJavaFeature(HostEnvironment host,JarInventory active){
         for(String value:List.of(host.currentJava(),active==null?"":Discovery.attr(active,"Min-Java-Version"))){
             var matcher=java.util.regex.Pattern.compile("^(?:1\\.)?(\\d+)").matcher(value);if(matcher.find()){int feature=Integer.parseInt(matcher.group(1));if(feature>=8)return feature;}
         }
         return 8;
-    }
-    private static List<JarInventory> preferTargeted(List<JarInventory> broad,List<JarInventory> targeted){
-        Set<String> exact=new HashSet<>();targeted.forEach(j->exact.addAll(j.classes().keySet()));List<JarInventory> result=new ArrayList<>();
-        for(JarInventory jar:broad){Map<String,ClassInfo> classes=new TreeMap<>(jar.classes());exact.forEach(classes::remove);result.add(new JarInventory(jar.path(),jar.sha256(),jar.manifest(),classes,jar.signatureFiles(),jar.cordappEntrypoints()));}
-        result.addAll(targeted);return result;
     }
     private static void applicationJava(List<Finding> findings,List<JarInventory> apps,String scope){
         for(JarInventory jar:apps)if(jar.classes().values().stream().anyMatch(c->c.majorVersion()>61))findings.add(Finding.of("LP-JAVA-003","CorDapp bytecode requires a JVM newer than Java 17","BLOCKED","JAVA","HIGH","BYTECODE",scope+"/"+jar.path(),List.of("Artifact: "+jar.path(),"Maximum bytecode version: "+jar.classes().values().stream().mapToInt(ClassInfo::majorVersion).max().orElse(0)),"The supplied application cannot run on the target Java 17 runtime","Rebuild the application for the supported target Java version."));

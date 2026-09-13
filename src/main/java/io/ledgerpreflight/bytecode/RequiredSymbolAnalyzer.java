@@ -1,6 +1,7 @@
 package io.ledgerpreflight.bytecode;
 
 import java.util.*;
+import java.util.function.Predicate;
 import org.objectweb.asm.Opcodes;
 import static io.ledgerpreflight.bytecode.BytecodeScanner.*;
 import static io.ledgerpreflight.bytecode.TargetedRuntimeLookup.*;
@@ -8,15 +9,28 @@ import static io.ledgerpreflight.bytecode.TargetedRuntimeLookup.*;
 /** Exact linkage questions extracted exclusively from active current CorDapp bytecode. */
 public final class RequiredSymbolAnalyzer {
     public enum Resolution { COMPATIBLE, MISSING_METHOD, MISSING_FIELD, MISSING_CLASS, DESCRIPTOR_MISMATCH, INVOCATION_MISMATCH, ACCESS_INCOMPATIBLE, UNKNOWN }
+    public enum ExecutionContext { CURRENT_NODE_RUNTIME, TARGET_NODE_RUNTIME, TARGET_VERIFIER }
     public record Source(String sourceArtifact,String sourceClass,String sourceMethod,String owner,String member,String descriptor,String referenceType) {}
     public record Symbol(String owner,String member,String descriptor,String kind,int opcode,Boolean ownerInterface) {
         public Symbol(String owner,String member,String descriptor,String kind,int opcode){this(owner,member,descriptor,kind,opcode,opcode==Opcodes.INVOKEINTERFACE?Boolean.TRUE:opcode==Opcodes.INVOKEVIRTUAL?Boolean.FALSE:null);}
         public String display(){return owner.replace('/','.')+"."+member+descriptor;}
         Reference reference(){return new Reference("",kind,owner,member,descriptor,opcode,ownerInterface);}
     }
-    public record Proof(String classStatus,String memberStatus,List<String> artifacts,String declaringClass,List<String> availableDescriptors,String detail) {}
-    public record SymbolResult(Symbol symbol,List<Source> sources,Proof current,Proof target,Resolution resolution) {}
-    public record Analysis(List<CompatibilityAnalyzer.CompatibilityIssue> findings,List<SymbolResult> symbols,boolean complete,List<JarInventory> currentClasses,List<JarInventory> targetClasses) {}
+    public record Proof(String classStatus,String memberStatus,List<String> artifacts,String declaringClass,List<String> availableDescriptors,String detail,String winningArtifact,List<String> shadowedArtifacts,String precedenceEvidence) {
+        public Proof(String classStatus,String memberStatus,List<String> artifacts,String declaringClass,List<String> availableDescriptors,String detail){this(classStatus,memberStatus,artifacts,declaringClass,availableDescriptors,detail,"",List.of(),"");}
+        public Proof { winningArtifact=winningArtifact==null?"":winningArtifact;shadowedArtifacts=shadowedArtifacts==null?List.of():List.copyOf(shadowedArtifacts);precedenceEvidence=precedenceEvidence==null?"":precedenceEvidence; }
+    }
+    public record ContextResult(ExecutionContext context,Proof proof,Resolution resolution,List<Source> sources) {
+        public ContextResult(ExecutionContext context,Proof proof,Resolution resolution){this(context,proof,resolution,List.of());}
+        public ContextResult { sources=sources==null?List.of():List.copyOf(sources); }
+    }
+    public record SymbolResult(Symbol symbol,List<Source> sources,Proof current,Proof target,Resolution resolution,List<ContextResult> contexts) {
+        public SymbolResult(Symbol symbol,List<Source> sources,Proof current,Proof target,Resolution resolution){this(symbol,sources,current,target,resolution,List.of());}
+        public SymbolResult { contexts=contexts==null?List.of():List.copyOf(contexts); }
+    }
+    public record Analysis(List<CompatibilityAnalyzer.CompatibilityIssue> findings,List<SymbolResult> symbols,boolean complete,List<JarInventory> currentClasses,List<JarInventory> targetClasses,List<JarInventory> verifierClasses) {
+        public Analysis(List<CompatibilityAnalyzer.CompatibilityIssue> findings,List<SymbolResult> symbols,boolean complete,List<JarInventory> currentClasses,List<JarInventory> targetClasses){this(findings,symbols,complete,currentClasses,targetClasses,List.of());}
+    }
     public interface Lookup { Result lookup(String owner); default void prefetch(Collection<String> owners){} }
     private static final int MAX_SYMBOLS=4096,MAX_SOURCES=16384;
     private static final long MAX_SOURCE_BYTES=2L*1024*1024;
@@ -30,9 +44,16 @@ public final class RequiredSymbolAnalyzer {
     }
     private static Lookup adapt(TargetedRuntimeLookup lookup){return new Lookup(){public Result lookup(String owner){return lookup.lookup(owner);}public void prefetch(Collection<String> owners){lookup.prefetch(owners);}};}
     public Analysis analyze(List<JarInventory> consumers,TargetedRuntimeLookup current,TargetedRuntimeLookup target){return analyze(consumers,adapt(current),adapt(target));}
-    public Analysis analyze(List<JarInventory> consumers,Lookup currentLookup,Lookup targetLookup){
+    public Analysis analyze(List<JarInventory> consumers,TargetedRuntimeLookup current,TargetedRuntimeLookup target,TargetedRuntimeLookup verifier){return analyze(consumers,adapt(current),adapt(target),verifier==null?null:adapt(verifier));}
+    public Analysis analyze(List<JarInventory> consumers,TargetedRuntimeLookup current,TargetedRuntimeLookup target,TargetedRuntimeLookup verifier,Predicate<Source> verifierApplies){return analyze(consumers,adapt(current),adapt(target),verifier==null?null:adapt(verifier),verifierApplies);}
+    public Analysis analyze(List<JarInventory> consumers,Lookup currentLookup,Lookup targetLookup){return analyze(consumers,currentLookup,targetLookup,null);}
+    /** Each lookup represents one execution context; absence of a verifier lookup means it is not being evaluated. */
+    public Analysis analyze(List<JarInventory> consumers,Lookup currentLookup,Lookup targetLookup,Lookup verifierLookup){return analyze(consumers,currentLookup,targetLookup,verifierLookup,source->true);}
+    public Analysis analyze(List<JarInventory> consumers,Lookup currentLookup,Lookup targetLookup,Lookup verifierLookup,Predicate<Source> verifierApplies){
+        Objects.requireNonNull(verifierApplies,"verifierApplies");
         Map<String,List<Result>> local=new TreeMap<>();for(JarInventory jar:consumers)for(ClassInfo cls:jar.classes().values())local.computeIfAbsent(cls.name(),k->new ArrayList<>()).add(new Result(State.FOUND,cls,List.of(jar.path()),"Active current CorDapp class"));
         Tracked current=new Tracked(withLocal(currentLookup,local),local.keySet()),target=new Tracked(withLocal(targetLookup,local),local.keySet());
+        Tracked verifier=verifierLookup==null?null:new Tracked(withLocal(verifierLookup,local),local.keySet());
         Comparator<Symbol> ordering=Comparator.comparing(Symbol::owner).thenComparing(Symbol::member).thenComparing(Symbol::descriptor).thenComparing(Symbol::kind).thenComparingInt(Symbol::opcode).thenComparing(s->String.valueOf(s.ownerInterface()));
         Map<Symbol,LinkedHashSet<Source>> required=new TreeMap<>(ordering);boolean limited=false;int sourceCount=0;long sourceBytes=0;
         outer:for(JarInventory jar:consumers.stream().sorted(Comparator.comparing(JarInventory::path)).toList())for(ClassInfo cls:new TreeMap<>(jar.classes()).values())for(Reference ref:cls.references()){
@@ -46,21 +67,41 @@ public final class RequiredSymbolAnalyzer {
             if(sourceCount>=MAX_SOURCES||sourceBytes+bytes>MAX_SOURCE_BYTES){if(sources.isEmpty())required.remove(symbol);limited=true;break outer;}sources.add(source);sourceCount++;sourceBytes+=bytes;
         }
         prepareHierarchy(current,required.keySet());prepareHierarchy(target,required.keySet());
+        if(verifier!=null)prepareHierarchy(verifier,required.entrySet().stream().filter(e->e.getValue().stream().anyMatch(verifierApplies)).map(Map.Entry::getKey).toList());
         List<SymbolResult> symbols=new ArrayList<>();List<CompatibilityAnalyzer.CompatibilityIssue> findings=new ArrayList<>();Map<String,SymbolResult> roots=new LinkedHashMap<>(),internalRoots=new LinkedHashMap<>();boolean complete=!limited;
         for(var entry:required.entrySet()){
             Symbol symbol=entry.getKey();Linked before=resolve(current,symbol),after=resolve(target,symbol);List<Source> sources=List.copyOf(entry.getValue());
-            Resolution result=classify(symbol,before,after,sources,target);complete&=result!=Resolution.UNKNOWN;
-            SymbolResult proof=new SymbolResult(symbol,sources,proof(before,symbol),proof(after,symbol),result);symbols.add(proof);
+            Resolution nodeResolution=classify(symbol,before,after,sources,target);List<ContextResult> contexts=new ArrayList<>();
+            Proof currentProof=proof(before,symbol),targetProof=proof(after,symbol);
+            contexts.add(new ContextResult(ExecutionContext.CURRENT_NODE_RUNTIME,currentProof,classify(symbol,before,before,sources,current),sources));
+            contexts.add(new ContextResult(ExecutionContext.TARGET_NODE_RUNTIME,targetProof,nodeResolution,sources));
+            List<Source> verifierSources=verifier==null?List.of():sources.stream().filter(verifierApplies).toList();
+            if(!verifierSources.isEmpty()){Linked verified=resolve(verifier,symbol);contexts.add(new ContextResult(ExecutionContext.TARGET_VERIFIER,proof(verified,symbol),classify(symbol,before,verified,verifierSources,verifier),verifierSources));}
+            Resolution result=aggregate(contexts);complete&=contexts.stream().filter(c->c.context()!=ExecutionContext.CURRENT_NODE_RUNTIME).noneMatch(c->c.resolution()==Resolution.UNKNOWN);
+            SymbolResult proof=new SymbolResult(symbol,sources,currentProof,targetProof,result,contexts);symbols.add(proof);
             if(result!=Resolution.COMPATIBLE)roots.merge(rootKey(proof),proof,RequiredSymbolAnalyzer::combineSources);
             if(internal(symbol.owner()))internalRoots.merge(symbol.owner()+"|"+symbol.kind()+"|"+symbol.member()+"|"+symbol.descriptor(),proof,RequiredSymbolAnalyzer::combineSources);
         }
         roots.values().forEach(root->findings.add(finding(root)));
         internalRoots.values().forEach(root->findings.add(issue("LP-INTERNAL-001","WARNING","CorDapp references an internal Corda API; internal APIs have no normal stability guarantee",evidence(root),"Replace internal API use with a supported API, or validate the exact supplied runtime and historical transactions with TVU.")));
         if(limited)findings.add(issue("LP-ANALYSIS-LIMIT","UNKNOWN","Required compatibility reference limit reached; remaining questions are unresolved",Map.of("sourceScope","active-current-cordapp","retainedSymbols",Integer.toString(required.size()),"retainedSources",Integer.toString(sourceCount)),"Complete bounded analysis of the active current CorDapps before upgrading."));
-        return new Analysis(List.copyOf(findings),List.copyOf(symbols),complete,current.inventories(),target.inventories());
+        return new Analysis(List.copyOf(findings),List.copyOf(symbols),complete,current.inventories(),target.inventories(),verifier==null?List.of():verifier.inventories());
+    }
+    private static boolean blocked(Resolution resolution){return resolution!=Resolution.COMPATIBLE&&resolution!=Resolution.UNKNOWN;}
+    private static Resolution aggregate(List<ContextResult> contexts){
+        List<Resolution> target=contexts.stream().filter(c->c.context()!=ExecutionContext.CURRENT_NODE_RUNTIME).map(ContextResult::resolution).toList();
+        return target.stream().filter(RequiredSymbolAnalyzer::blocked).findFirst().orElse(target.contains(Resolution.UNKNOWN)?Resolution.UNKNOWN:Resolution.COMPATIBLE);
     }
     private static String rootKey(SymbolResult result){Symbol symbol=result.symbol();return result.resolution()+"|"+symbol.owner()+(result.resolution()==Resolution.MISSING_CLASS?"":"|"+symbol.kind()+"|"+symbol.member()+"|"+symbol.descriptor());}
-    private static SymbolResult combineSources(SymbolResult first,SymbolResult next){Set<Source> sources=new LinkedHashSet<>(first.sources());sources.addAll(next.sources());return new SymbolResult(first.symbol(),List.copyOf(sources),first.current(),first.target(),first.resolution());}
+    private static SymbolResult combineSources(SymbolResult first,SymbolResult next){
+        Set<Source> sources=new LinkedHashSet<>(first.sources());sources.addAll(next.sources());
+        Map<ExecutionContext,ContextResult> contexts=new LinkedHashMap<>();first.contexts().forEach(c->contexts.put(c.context(),c));
+        next.contexts().forEach(c->contexts.merge(c.context(),c,(a,b)->{
+            ContextResult retained=blocked(a.resolution())?a:blocked(b.resolution())?b:a.resolution()==Resolution.UNKNOWN?a:b;
+            Set<Source> contextSources=new LinkedHashSet<>(a.sources());contextSources.addAll(b.sources());return new ContextResult(retained.context(),retained.proof(),retained.resolution(),List.copyOf(contextSources));
+        }));
+        return new SymbolResult(first.symbol(),List.copyOf(sources),first.current(),first.target(),first.resolution(),List.copyOf(contexts.values()));
+    }
     private record HierarchyQuestion(String owner,Symbol symbol) {}
     /** Batch only ancestors needed for undeclared exact members, avoiding one capsule traversal per caller. */
     private static void prepareHierarchy(Lookup lookup,Collection<Symbol> symbols){
@@ -154,7 +195,7 @@ public final class RequiredSymbolAnalyzer {
     private static Proof proof(Linked linked,Symbol symbol){
         String owner=linked.owner().state()==State.FOUND?"found":linked.owner().state()==State.ABSENT?"absent":"unknown";
         String member=symbol.kind().equals("CLASS")?"not-applicable":linked.incomplete()?"unknown":linked.member()!=null?"found":!linked.alternatives().isEmpty()?"descriptor-mismatch":"absent";
-        return new Proof(owner,member,linked.owner().origins(),linked.declaring()==null?"":linked.declaring().name(),List.copyOf(linked.alternatives()),linked.detail());
+        return new Proof(owner,member,linked.owner().origins(),linked.declaring()==null?"":linked.declaring().name(),List.copyOf(linked.alternatives()),linked.detail(),linked.owner().winningOrigin(),linked.owner().shadowedOrigins(),linked.owner().precedenceEvidence());
     }
     private static CompatibilityAnalyzer.CompatibilityIssue finding(SymbolResult result){
         String id=result.resolution()==Resolution.MISSING_CLASS?"LP-API-006":result.resolution()==Resolution.UNKNOWN?"LP-API-003":result.resolution()==Resolution.ACCESS_INCOMPATIBLE?"LP-API-005":"LP-API-001";
@@ -167,14 +208,38 @@ public final class RequiredSymbolAnalyzer {
             case ACCESS_INCOMPATIBLE -> "Required class or member is inaccessible to the historical CorDapp caller";
             default -> "A required CorDapp compatibility question could not be completely resolved";
         };
-        return issue(id,result.resolution()==Resolution.UNKNOWN?"UNKNOWN":"BLOCKED",message,evidence(result),result.resolution()==Resolution.UNKNOWN?"Supply the missing current/target runtime or required dependency evidence, then validate again.":"Use a compatible target runtime or supported compatibility fix, then validate again with TVU.");
+        boolean verifierOnly=result.contexts().stream().anyMatch(c->c.context()==ExecutionContext.TARGET_VERIFIER&&blocked(c.resolution()))&&result.contexts().stream().noneMatch(c->c.context()==ExecutionContext.TARGET_NODE_RUNTIME&&blocked(c.resolution()));
+        if(verifierOnly)message=switch(result.resolution()){
+            case MISSING_METHOD -> "Historical CorDapp requires an exact method present in the current runtime but missing from the target external verifier class hierarchy";
+            case MISSING_FIELD -> "Historical CorDapp requires an exact field present in the current runtime but missing from the target external verifier class hierarchy";
+            case MISSING_CLASS -> "Historical CorDapp requires a class present in the current runtime but absent after complete targeted external verifier lookup";
+            case DESCRIPTOR_MISMATCH -> "Required member name exists in the target external verifier with an incompatible JVM descriptor";
+            case INVOCATION_MISMATCH -> "Required member has incompatible invocation semantics in the target external verifier";
+            case ACCESS_INCOMPATIBLE -> "Required class or member is inaccessible to the historical CorDapp caller in the target external verifier";
+            default -> message;
+        };
+        return issue(id,result.resolution()==Resolution.UNKNOWN?"UNKNOWN":"BLOCKED",message,evidence(result),result.resolution()==Resolution.UNKNOWN?"Supply the missing current/target runtime or required dependency evidence, then validate again.":verifierOnly?"Use a compatible target external verifier or supported compatibility fix, then validate historical transactions again with TVU.":"Use a compatible target runtime or supported compatibility fix, then validate again with TVU.");
     }
     private static Map<String,String> evidence(SymbolResult result){
-        Symbol symbol=result.symbol();Map<String,String> data=new TreeMap<>();data.put("sourceScope","active-current-cordapp");data.put("ownerInterface",Objects.toString(symbol.ownerInterface(),"unknown"));int n=0;for(String artifact:result.sources().stream().map(Source::sourceArtifact).distinct().sorted().toList())data.put(++n==1?"sourceArtifact":"sourceArtifact."+n,artifact);
-        if(!result.sources().isEmpty()){Source source=result.sources().get(0);data.put("jar",source.sourceArtifact());data.put("class",source.sourceClass());data.put("sourceClass",source.sourceClass());data.put("sourceMethod",source.sourceMethod());data.put("referenceType",source.referenceType());}
-        data.put("owner",symbol.owner());data.put("member",symbol.member());data.put("descriptor",symbol.descriptor());data.put("kind",symbol.kind());data.put("symbol",symbol.display());data.put("invocationOpcode",Integer.toString(symbol.opcode()));data.put("referencedClasses",Long.toString(result.sources().stream().map(s->s.sourceArtifact()+"!/"+s.sourceClass()).distinct().count()));data.put("referenceSites",Integer.toString(result.sources().size()));
-        data.put("currentClass",result.current().classStatus());data.put("currentMember",result.current().memberStatus());data.put("currentArtifact",String.join("; ",result.current().artifacts()));data.put("currentDeclaringClass",result.current().declaringClass());data.put("targetClass",result.target().classStatus());data.put("targetMember",result.target().memberStatus());data.put("targetJar",String.join("; ",result.target().artifacts()));data.put("targetDeclaringClass",result.target().declaringClass());data.put("targetAvailableDescriptors",result.target().availableDescriptors().toString());data.put("requiredMember",result.target().memberStatus().equals("found")?"present":result.target().memberStatus().equals("unknown")?"unknown":"absent");data.put("resolution",result.resolution().name().toLowerCase(Locale.ROOT).replace('_','-'));data.put("currentResolutionDetail",result.current().detail());data.put("targetResolutionDetail",result.target().detail());return data;
+        Symbol symbol=result.symbol();List<Source> affected=affectedSources(result);Map<String,String> data=new TreeMap<>();data.put("sourceScope","active-current-cordapp");data.put("ownerInterface",Objects.toString(symbol.ownerInterface(),"unknown"));int n=0;for(String artifact:affected.stream().map(Source::sourceArtifact).distinct().sorted().toList())data.put(++n==1?"sourceArtifact":"sourceArtifact."+n,artifact);
+        if(!affected.isEmpty()){Source source=affected.get(0);data.put("jar",source.sourceArtifact());data.put("class",source.sourceClass());data.put("sourceClass",source.sourceClass());data.put("sourceMethod",source.sourceMethod());data.put("referenceType",source.referenceType());}
+        data.put("owner",symbol.owner());data.put("member",symbol.member());data.put("descriptor",symbol.descriptor());data.put("kind",symbol.kind());data.put("symbol",symbol.display());data.put("invocationOpcode",Integer.toString(symbol.opcode()));data.put("referencedClasses",Long.toString(affected.stream().map(s->s.sourceArtifact()+"!/"+s.sourceClass()).distinct().count()));data.put("referenceSites",Integer.toString(affected.size()));
+        data.put("currentClass",result.current().classStatus());data.put("currentMember",result.current().memberStatus());data.put("currentArtifact",String.join("; ",result.current().artifacts()));data.put("currentDeclaringClass",result.current().declaringClass());data.put("targetClass",result.target().classStatus());data.put("targetMember",result.target().memberStatus());data.put("targetJar",String.join("; ",result.target().artifacts()));data.put("targetDeclaringClass",result.target().declaringClass());data.put("targetAvailableDescriptors",result.target().availableDescriptors().toString());data.put("requiredMember",result.target().memberStatus().equals("found")?"present":result.target().memberStatus().equals("unknown")?"unknown":"absent");data.put("resolution",resolutionName(result.resolution()));data.put("currentResolutionDetail",result.current().detail());data.put("targetResolutionDetail",result.target().detail());
+        data.put("blockedContexts",contextNames(result,c->blocked(c.resolution())));data.put("unknownContexts",contextNames(result,c->c.resolution()==Resolution.UNKNOWN));
+        for(ContextResult context:result.contexts()){
+            String prefix=switch(context.context()){case CURRENT_NODE_RUNTIME->"current";case TARGET_NODE_RUNTIME->"target";case TARGET_VERIFIER->"verifier";};
+            data.put(prefix+"Resolution",resolutionName(context.resolution()));data.put(prefix+"WinningArtifact",context.proof().winningArtifact());data.put(prefix+"ShadowedArtifacts",String.join("; ",context.proof().shadowedArtifacts()));data.put(prefix+"PrecedenceEvidence",context.proof().precedenceEvidence());
+            if(context.context()==ExecutionContext.TARGET_NODE_RUNTIME)data.put("nodeResolution",resolutionName(context.resolution()));
+            if(context.context()==ExecutionContext.TARGET_VERIFIER){Proof proof=context.proof();data.put("verifierClass",proof.classStatus());data.put("verifierMember",proof.memberStatus());data.put("verifierJar",String.join("; ",proof.artifacts()));data.put("verifierDeclaringClass",proof.declaringClass());data.put("verifierAvailableDescriptors",proof.availableDescriptors().toString());data.put("verifierResolutionDetail",proof.detail());data.put("verifierReferenceSites",Integer.toString(context.sources().size()));}
+        }
+        return data;
     }
+    private static List<Source> affectedSources(SymbolResult result){
+        List<Source> affected=result.contexts().stream().filter(c->c.context()!=ExecutionContext.CURRENT_NODE_RUNTIME).filter(c->blocked(result.resolution())?blocked(c.resolution()):c.resolution()==Resolution.UNKNOWN).flatMap(c->c.sources().stream()).distinct().toList();
+        return affected.isEmpty()?result.sources():affected;
+    }
+    private static String contextNames(SymbolResult result,Predicate<ContextResult> selected){return String.join(",",result.contexts().stream().filter(c->c.context()!=ExecutionContext.CURRENT_NODE_RUNTIME).filter(selected).map(c->c.context().name()).toList());}
+    private static String resolutionName(Resolution resolution){return resolution.name().toLowerCase(Locale.ROOT).replace('_','-');}
     private static String physical(String artifact){int nested=artifact.indexOf("!/");return nested<0?artifact:artifact.substring(0,nested);}
     private static String packageName(String name){int slash=name.lastIndexOf('/');return slash<0?"":name.substring(0,slash);}
     private static boolean internal(String name){return name.startsWith("net/corda/")&&Arrays.stream(name.split("/")).anyMatch(s->s.equalsIgnoreCase("internal"));}

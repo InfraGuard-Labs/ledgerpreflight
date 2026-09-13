@@ -13,7 +13,8 @@ public final class ProductView {
         for(Finding f:a.findings())if(attention(f)) {
             String group=switch(f.category()){
                 case "API_COMPATIBILITY"->f.severity().equals("UNKNOWN")&&value(f,"resolution").equals("unknown")?"Compatibility analysis incomplete":"CorDapp compatibility";
-                case "INTERNAL_API","LEGACY_JARS","CORDAPP","SIGNING"->"CorDapp compatibility";
+                case "CORDAPP"->f.id().equals("LP-CORDAPP-005")?"Target CorDapp mapping":"CorDapp compatibility";
+                case "INTERNAL_API","LEGACY_JARS","SIGNING"->"CorDapp compatibility";
                 case "TVU"->"TVU validation";
                 case "DATABASE_SCHEMA"->"Schema configuration";
                 case "SECURITY"->"Compatibility analysis incomplete";
@@ -22,7 +23,9 @@ public final class ProductView {
                 default->"Upgrade preparation";
             };
             groups.computeIfAbsent(group,k->new ArrayList<>()).add(f);
+            if(blockedApi(f)&&!value(f,"unknownContexts").isEmpty())groups.computeIfAbsent("Compatibility analysis incomplete",k->new ArrayList<>()).add(f);
         }
+        boolean confirmedCompatibility=a.findings().stream().anyMatch(ProductView::blockedApi);
         List<Issue> result=new ArrayList<>();
         for(var group:groups.entrySet()) {
             List<Finding> fs=group.getValue();boolean warning=fs.stream().allMatch(f->f.severity().equals("WARNING"));
@@ -33,10 +36,18 @@ public final class ProductView {
                     boolean absent=fs.stream().anyMatch(ProductView::blockedApi);
                     boolean shadow=fs.stream().anyMatch(f->f.id().equals("LP-LEGACY-001")&&f.severity().equals("BLOCKED"));
                     String scope=fs.stream().filter(ProductView::blockedApi).allMatch(f->value(f,"sourceScope").equals("active-current-cordapp")||f.affectedArtifact().startsWith("current/historical/"))?"A historical CorDapp":"A supplied CorDapp";
-                    happened=absent?scope+" uses an API that is not available in the target Corda runtime.":first.title()+".";
+                    boolean nodeBlocked=fs.stream().filter(ProductView::blockedApi).anyMatch(f->value(f,"blockedContexts").isEmpty()||context(f,"blockedContexts","TARGET_NODE_RUNTIME"));
+                    boolean verifierBlocked=fs.stream().filter(ProductView::blockedApi).anyMatch(f->context(f,"blockedContexts","TARGET_VERIFIER"));
+                    String target=nodeBlocked?(verifierBlocked?"target Corda runtime and its verifier":"target Corda runtime"):"target verifier";
+                    happened=absent?scope+" uses an API that is not available in the "+target+".":first.title()+".";
                     if(shadow)happened+=" The verifier selects an earlier class, so the compatibility JAR cannot supply the fix.";
                     matters="Historical transactions using this CorDapp may fail re-verification after the upgrade.";
-                    action=absent?"Use a compatible target runtime or supported compatibility fix, then validate again.":first.recommendedNextAction();
+                    action=absent?(!nodeBlocked&&verifierBlocked?"Use a compatible target verifier or supported compatibility fix, then validate again.":"Use a compatible target runtime or supported compatibility fix, then validate again."):first.recommendedNextAction();
+                }
+                case "Target CorDapp mapping" -> {
+                    happened="Target CorDapp mapping: unresolved.";
+                    matters="Replacement and signing continuity checks need a clear current-to-target CorDapp pairing.";
+                    action="Confirm which target CorDapp replaces the current CorDapp, then validate again.";
                 }
                 case "TVU validation" -> {
                     if(a.evidence().get("tvu-summary") instanceof TvuEvidence t && t.failed()!=null&&t.failed()>0) {
@@ -53,7 +64,7 @@ public final class ProductView {
                     action="Confirm/configure the intended TVU schema and rerun validation.";
                 }
                 case "Compatibility analysis incomplete" -> {
-                    happened="A required compatibility question could not be resolved safely.";
+                    happened=confirmedCompatibility?"Additional compatibility analysis is incomplete.":"A required compatibility question could not be resolved safely.";
                     matters="Compatibility remains unproven for the affected source CorDapp.";
                     action="Export the full technical report for the affected inputs. Complete compatibility analysis before upgrading.";
                 }
@@ -65,6 +76,7 @@ public final class ProductView {
         return List.copyOf(result);
     }
     private static boolean blockedApi(Finding f){return f.category().equals("API_COMPATIBILITY")&&f.severity().equals("BLOCKED");}
+    private static boolean context(Finding f,String key,String context){return Arrays.stream(value(f,key).split(",")).map(String::trim).anyMatch(context::equals);}
     /** Exact owner/member/descriptor correlation, scoped strictly to supplied detailed records. */
     public static String correlation(Assessment a,TvuEvidence tvu) {
         long matching=0;
@@ -112,7 +124,7 @@ public final class ProductView {
         }
         if(issues.size()>selected.size())out.append("\nAdditional issues are explained in the exported technical report.\n");
         out.append("\nNEXT STEP\n");
-        out.append(issues.stream().anyMatch(i->i.title().equals("Compatibility analysis incomplete"))?"Complete compatibility analysis before upgrading.\n":issues.stream().anyMatch(i->i.title().equals("CorDapp compatibility")&&!i.warning())?"Resolve the CorDapp compatibility issue first.\nThen rerun LedgerPreflight and TVU.\n":"Resolve the outstanding reviews, then rerun LedgerPreflight and TVU.\n");
+        out.append(issues.stream().anyMatch(i->i.title().equals("CorDapp compatibility")&&!i.warning())?"Resolve the CorDapp compatibility issue first.\nThen rerun LedgerPreflight and TVU.\n":issues.stream().anyMatch(i->i.title().equals("Compatibility analysis incomplete"))?"Complete compatibility analysis before upgrading.\n":"Resolve the outstanding reviews, then rerun LedgerPreflight and TVU.\n");
         return out.toString();
     }
     private ProductView(){}

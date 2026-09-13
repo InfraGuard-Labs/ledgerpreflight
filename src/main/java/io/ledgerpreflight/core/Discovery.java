@@ -16,6 +16,8 @@ public final class Discovery {
         if(path.startsWith("legacy-jars/"))return "LEGACY";
         if(path.startsWith("legacy-contracts/"))return "LEGACY_CONTRACT";
         if(!attr(j,"Cordapp-Contract-Name").isBlank()||!attr(j,"Cordapp-Workflow-Name").isBlank())return attr(j,"Physical-Scope").equals("root")?"SUPPORT":"CORDAPP";
+        // An explicit node launcher remains a node even when its capsule bundles tool entrypoints.
+        if(main.contains("net.corda.node."))return "RUNTIME";
         if(attr(j,"TVU-Entry-Evidence").equals("true")||main.contains("net.corda.transactionvalidator.") || main.contains("net.corda.tools.transactionvalidator") || main.contains("net.corda.tools.transaction.validator") || j.classes().keySet().stream().anyMatch(c->c.startsWith("net/corda/transactionvalidator/")||c.startsWith("net/corda/tools/transactionvalidator/")||c.equals("net/corda/tools/TransactionValidator")))return "TVU";
         if(main.contains("verifier") || j.classes().containsKey("net/corda/verifier/Main"))return "VERIFIER";
         if(main.contains("net.corda.node.") || j.classes().containsKey("net/corda/node/Corda") || j.classes().containsKey("net/corda/node/internal/Node"))return "RUNTIME";

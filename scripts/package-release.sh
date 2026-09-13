@@ -17,6 +17,10 @@ cp /workspace/docs/RELEASE-NOTES.md /dist/RELEASE_NOTES.md
 mkdir -p /tmp/ledger-preflight-0.1.0
 cp /dist/ledger-preflight /dist/ledger-preflight-0.1.0.jar /workspace/LICENSE /workspace/THIRD-PARTY-NOTICES /workspace/README.md /tmp/ledger-preflight-0.1.0/
 cp -a /workspace/docs /tmp/ledger-preflight-0.1.0/
+# Normalize product permissions even when Docker receives a Windows bind mount.
+find /tmp/ledger-preflight-0.1.0 -type d -exec chmod 755 {} +
+find /tmp/ledger-preflight-0.1.0 -type f -exec chmod 644 {} +
+chmod 755 /tmp/ledger-preflight-0.1.0/ledger-preflight
 tar --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner -C /tmp -cf - ledger-preflight-0.1.0 | gzip -n > /dist/ledger-preflight-0.1.0.tar.gz
 cp -a /opt/ledgerpreflight-jre /tmp/ledger-preflight-0.1.0/runtime
 tar --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner -C /tmp -cf - ledger-preflight-0.1.0 | gzip -n > /dist/ledger-preflight-0.1.0-linux-x86_64.tar.gz

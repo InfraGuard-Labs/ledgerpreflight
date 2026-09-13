@@ -17,9 +17,10 @@ final class ResultEvidence {
     }
     static String compatibility(Assessment a){
         List<Finding> findings=a.findings().stream().filter(f->attention(f)&&COMPATIBILITY.contains(f.category())).sorted().toList();
-        var issue=ProductView.issues(a).stream().filter(i->i.title().equals("CorDapp compatibility")).findFirst();
+        var issue=ProductView.issues(a).stream().filter(i->i.title().equals("CorDapp compatibility")||i.title().equals("Target CorDapp mapping")).findFirst();
         List<Finding> referenced=findings.stream().filter(f->f.category().equals("API_COMPATIBILITY")&&!api(f).isEmpty()).toList();
-        List<String> artifacts=(referenced.isEmpty()?findings:referenced).stream().flatMap(f->sourceArtifacts(f).stream()).map(ResultEvidence::filename).distinct().limit(3).toList();
+        List<Finding> confirmed=referenced.stream().filter(f->f.severity().equals("BLOCKED")).toList();
+        List<String> artifacts=(!confirmed.isEmpty()?confirmed:referenced.isEmpty()?findings:referenced).stream().flatMap(f->sourceArtifacts(f).stream()).map(ResultEvidence::filename).distinct().limit(3).toList();
         Map<String,Finding> roots=new LinkedHashMap<>();
         for(Finding f:referenced)roots.putIfAbsent(kind(f)+"\n"+field(f,"owner")+"\n"+field(f,"member")+"\n"+field(f,"descriptor"),f);
         StringBuilder out=new StringBuilder("COMPATIBILITY EVIDENCE\n\nAffected CorDapp\n"+(artifacts.isEmpty()?"Source artifact not established":String.join("\n",artifacts)));
@@ -31,9 +32,12 @@ final class ResultEvidence {
             if(classes.matches("[0-9]{1,9}")&&Integer.parseInt(classes)>1)out.append("\nReferenced by ").append(classes).append(" source classes");
             out.append("\n\nCurrent runtime · Corda ").append(a.sourceVersion()).append("\n").append(proof(root,"current"));
             out.append("\n\nTarget runtime · Corda ").append(a.targetVersion()).append("\n").append(proof(root,"target"));
+            if(!field(root,"verifierClass").isEmpty())out.append("\n\nTarget verifier · Corda ").append(a.targetVersion()).append("\n").append(proof(root,"verifier"));
         }
         if(roots.isEmpty())out.append("\n\nProblem\n").append(issue.map(ProductView.Issue::happened).orElse("Compatibility requires review."));
         else if(roots.size()>3)out.append("\n\nAdditional API evidence is available in the exported technical report.");
+        if(findings.stream().anyMatch(f->f.id().equals("LP-CORDAPP-005")))out.append("\n\nTarget CorDapp mapping\nUnresolved.").append(roots.isEmpty()?"":" Runtime API compatibility was checked independently.");
+        if(!confirmed.isEmpty()&&findings.stream().anyMatch(f->f.severity().equals("UNKNOWN")||!field(f,"unknownContexts").isEmpty()))out.append("\n\nAdditional compatibility analysis is incomplete.\nThe confirmed incompatibility still needs resolution.");
         out.append("\n\nImpact\n").append(issue.map(ProductView.Issue::matters).orElse("Historical transactions may fail re-verification."));
         out.append("\n\nRecommended action\n").append(issue.map(ProductView.Issue::action).orElse("Review the exported report and validate again."));
         return out.toString();
@@ -60,11 +64,12 @@ final class ResultEvidence {
         if(kind.equals("CLASS")||field(f,"member").isEmpty())return found;
         String label=kind.equals("FIELD")?"Field":"Method";
         String member=switch(memberState){case "found","present"->label+" found";case "absent"->label+" missing";case "descriptor-mismatch"->label+" signature changed";default->label+" lookup incomplete";};
-        String linkage=side.equals("target")?switch(field(f,"resolution")){
+        String resolution=side.equals("target")?(field(f,"targetResolution").isEmpty()?field(f,"resolution"):field(f,"targetResolution")):side.equals("verifier")?field(f,"verifierResolution"):"";
+        String linkage=switch(resolution){
             case "invocation-mismatch"->"\nInvocation is incompatible with this CorDapp.";
             case "access-incompatible"->"\nMember is not accessible from this CorDapp.";
             default->"";
-        }:"";
+        };
         return found+" · "+member+linkage;
     }
     private static String kind(Finding f){String kind=field(f,"kind");return kind.isEmpty()?field(f,"referenceType"):kind;}
