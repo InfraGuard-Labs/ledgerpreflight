@@ -7,7 +7,7 @@ def hashes(directory):
 before=hashes(fixture)
 def assess(name,kind='clean',expected=1,extra=(),kit=None,json_output=True):
     base=fixture/kind
-    args=['java','-jar',str(jar),'assess','--node',str(base/'current-node'),'--upgrade-kit',str(kit or base/'upgrade-kit'),'--host-environment',str(base/'host.json'),'--output',str(out/name),'--non-interactive','--network-mode','all-4.12']
+    args=['java','-Xmx256m','-jar',str(jar),'assess','--node',str(base/'current-node'),'--upgrade-kit',str(kit or base/'upgrade-kit'),'--host-environment',str(base/'host.json'),'--output',str(out/name),'--non-interactive','--network-mode','all-4.12']
     if kind=='blocked':args+=['--tvu-results',str(base/'tvu.log'),'--tvu-results',str(base/'errors.zip'),'--verifier-classpath',str(base/'classpath.txt')]
     if json_output:args+=['--json']
     proc=subprocess.run([*args,*map(str,extra)],capture_output=True,timeout=60)

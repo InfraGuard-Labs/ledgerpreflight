@@ -18,7 +18,7 @@ import java.util.concurrent.Callable;
  subcommands={Main.Assess.class,Main.Inventory.class,Main.AnalyzeJar.class,Main.CompareRuntime.class,Main.AnalyzeTvu.class,Main.Explain.class,Main.Bundle.class,Main.Rules.class,Main.Version.class})
 public final class Main implements Callable<Integer> {
     @Spec Model.CommandSpec rootSpec;
-    public static void main(String[] args){CommandLine cli=command();int code=cli.execute(args);cli.getOut().flush();cli.getErr().flush();System.exit(code);}
+    public static void main(String[] args){try{CommandLine cli=command();int code=cli.execute(args);cli.getOut().flush();cli.getErr().flush();System.exit(code);}catch(VirtualMachineError fatal){if(System.console()!=null&&System.getenv("CI")==null)System.err.print("\u001b[?25h");System.err.println("LedgerPreflight could not complete analysis safely. No upgrade readiness was established.");System.err.flush();System.exit(3);}}
     public static CommandLine command(){return new CommandLine(new Main()).setExecutionExceptionHandler((e,c,p)->{c.getErr().println("Assessment error: "+Sanitizer.redact(Objects.toString(e.getMessage(),e.getClass().getSimpleName())).replaceAll("[\\p{Cntrl}]"," "));return 3;});}
     public Integer call(){
         Console console=System.console();

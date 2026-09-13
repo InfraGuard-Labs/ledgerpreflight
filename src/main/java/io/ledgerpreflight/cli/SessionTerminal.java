@@ -49,12 +49,14 @@ public class SessionTerminal {
     public int choose(String title,List<String> labels)throws IOException {
         if(advanced) {
             String saved;
-            try {saved=terminalMode("-g").strip();terminalMode("-icanon","-echo","min","0","time","1");}
+            try {saved=terminalMode("-g").strip();}
             catch(Exception e){advanced=false;return choose(title,labels);}
             Thread restore=new Thread(()->restore(saved),"restore-terminal");
 
             try {
                 Runtime.getRuntime().addShutdownHook(restore);
+                try {terminalMode("-icanon","-echo","min","0","time","1");}
+                catch(Exception e){restore(saved);advanced=false;return choose(title,labels);}
                 out.print("\u001b[?25l");out.flush();
                 int selected=0; draw(title,labels,selected);
                 while(true) {

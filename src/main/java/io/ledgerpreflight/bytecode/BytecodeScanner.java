@@ -1,14 +1,15 @@
 package io.ledgerpreflight.bytecode;
 
 import org.objectweb.asm.*;
+import io.ledgerpreflight.core.*;
 import java.io.*;
 import java.nio.file.*;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.*;
 import java.util.*;
-import java.util.jar.Manifest;
 import java.util.zip.*;
 
-/** Offline inventory. Never loads, links, executes, or extracts analyzed classes. */
+/** Offline bounded symbols. Classes are never executed; nested archives are spooled sequentially. */
 public final class BytecodeScanner {
     public record Limits(long maxArchiveBytes, int maxEntryBytes, long maxExpandedBytes,
                          int maxEntries, int maxDepth, int maxClasses, int maxReferences) {
@@ -28,151 +29,161 @@ public final class BytecodeScanner {
     public record ScanIssue(String code,String path,String message) {}
     public record ScanResult(List<JarInventory> jars,List<ScanIssue> issues) {}
     private final Limits limits;
+    // A scanner belongs to one assessment. This ceiling spans current/target/override scans.
+    private long retainedBytes;
+    public static final long MAX_RETAINED_BYTES=24L*1024*1024;
     public BytecodeScanner(){this(Limits.defaults());}
     public BytecodeScanner(Limits limits){this.limits=Objects.requireNonNull(limits);}
-    private static final class Budget { long expanded; int entries,classes,references,files; }
-    private static final class LimitException extends IOException { LimitException(String message){super(message);} }
-
-    public ScanResult scan(Path root) {
-        List<JarInventory> jars=new ArrayList<>(); List<ScanIssue> issues=new ArrayList<>(); Budget budget=new Budget();
-        Path absolute=root.toAbsolutePath().normalize();
-        try {
-            absolute=absolute.toRealPath();
-            if(Files.isRegularFile(absolute,LinkOption.NOFOLLOW_LINKS)){scanFile(absolute,absolute.getFileName().toString(),jars,issues,budget);}
-            else {
-                var tree=io.ledgerpreflight.evidence.BoundedPaths.discover(absolute,32,limits.maxEntries());
-                for(String issue:tree.issues())issues.add(new ScanIssue("LP-INPUT-001","discovery",issue));
-                Set<Path> scanned=new HashSet<>();
-                for(Path input:tree.files())if(io.ledgerpreflight.core.ArtifactDiscovery.isArchive(input)&&scanned.add(input.toRealPath()))scanFile(input.toRealPath(),absolute.relativize(input).toString().replace((char)92,'/'),jars,issues,new Budget());
+    private static final class Budget {long expanded,retained;int entries,classes,references,symbols,nested;}
+    private static final class LimitException extends IOException {LimitException(String message){super(message);}}
+    private static final class SymbolLimit extends RuntimeException {SymbolLimit(String message){super(message);}}
+    private void reserve(Budget budget,int overhead,String...values){
+        long amount=overhead;for(String value:values)if(value!=null){if(value.length()>2048)throw new SymbolLimit("Symbol text size limit reached");amount+=48L+2L*value.length();}
+        if(++budget.symbols>120000||retainedBytes+amount>MAX_RETAINED_BYTES)throw new SymbolLimit("Retained symbol memory/count limit reached");
+        retainedBytes+=amount;budget.retained+=amount;
+    }
+    public ScanResult scan(Path root){return scan(root,null);}
+    public ScanResult scanLayout(Path root,ScanResult identity){return scan(root,identity);}
+    private ScanResult scan(Path supplied,ScanResult identity){
+        List<JarInventory> jars=new ArrayList<>();List<ScanIssue> issues=new ArrayList<>();
+        try{
+            Path root=supplied.toRealPath();Set<Path> seen=new HashSet<>();
+            if(identity!=null){
+                for(JarInventory artifact:identity.jars()){
+                    String role=Discovery.role(artifact);if(role.equals("TVU"))continue;
+                    Path file=Files.isRegularFile(root)?root:root.resolve(artifact.path());
+                    boolean instructions=Set.of("CORDAPP","LEGACY","LEGACY_CONTRACT").contains(role);
+                    if(seen.add(file.toRealPath()))scanFile(file,artifact.path(),jars,issues,instructions);
+                }
+            }else{
+                var tree=io.ledgerpreflight.evidence.BoundedPaths.discover(root,32,limits.maxEntries());
+                tree.issues().forEach(i->issues.add(new ScanIssue("LP-INPUT-001","discovery",i)));
+                for(Path p:tree.files())if(ArtifactDiscovery.isArchive(p)&&seen.add(p.toRealPath())){
+                    String label=Files.isRegularFile(root)?root.getFileName().toString():root.relativize(p).toString().replace((char)92,'/');
+                    scanFile(p,label,jars,issues,true);
+                }
             }
-        }catch(IOException|UncheckedIOException|SecurityException e){issues.add(new ScanIssue("LP-INPUT-001",absolute.getFileName().toString(),e.getMessage()));}
+        }catch(IOException|SecurityException e){issues.add(new ScanIssue("LP-INPUT-001","discovery",Objects.toString(e.getMessage(),"Input unavailable")));}
         jars.sort(Comparator.comparing(JarInventory::path));issues.sort(Comparator.comparing(ScanIssue::path).thenComparing(ScanIssue::message));
         return new ScanResult(List.copyOf(jars),List.copyOf(issues));
     }
-    private void scanFile(Path path,String label,List<JarInventory> jars,List<ScanIssue> issues,Budget budget)throws IOException {
-        int start=jars.size();
-        try {
-            if(Files.size(path)>limits.maxArchiveBytes())throw new LimitException("Archive exceeds compressed size limit");
-            try(ZipFile validated=new ZipFile(path.toFile())){if(validated.size()>limits.maxEntries())throw new LimitException("Archive entry count exceeds limit");}
-            String hash;
-            try(InputStream input=Files.newInputStream(path,LinkOption.NOFOLLOW_LINKS)){hash=hash(input);}
-            try(InputStream input=Files.newInputStream(path,LinkOption.NOFOLLOW_LINKS)){scanArchive(input,label,hash,0,jars,issues,budget);}
-        }catch(LimitException e){jars.subList(start,jars.size()).clear();issues.add(new ScanIssue("LP-INPUT-001",label,"Archive analysis limit reached: "+e.getMessage()));
-            if(Files.size(path)>limits.maxArchiveBytes())return;
-            try(ZipFile zip=new ZipFile(path.toFile())){if(zip.size()<=limits.maxEntries()){var entries=zip.entries();while(entries.hasMoreElements())validateEntry(entries.nextElement().getName());ZipEntry entry=zip.getEntry("META-INF/MANIFEST.MF");if(entry!=null&&entry.getSize()<=65536){byte[] data;try(InputStream in=zip.getInputStream(entry)){data=in.readNBytes(65537);}if(data.length<=65536){Map<String,String> metadata=new TreeMap<>(String.CASE_INSENSITIVE_ORDER);new Manifest(new ByteArrayInputStream(data)).getMainAttributes().forEach((k,v)->metadata.put(k.toString(),v.toString()));metadata.put("Metadata-Origin","Outer manifest; bytecode coverage incomplete");try(InputStream in=Files.newInputStream(path)){jars.add(new JarInventory(label,hash(in),metadata,Map.of(),List.of()));}}}}}catch(IOException ignored){}}
-        catch(IOException|RuntimeException e){jars.subList(start,jars.size()).clear();issues.add(new ScanIssue("LP-INPUT-001",label,"Cannot inventory archive: "+e.getMessage()));}
+    private void scanFile(Path path,String label,List<JarInventory> jars,List<ScanIssue> issues,boolean instructions){
+        Budget budget=new Budget();int start=jars.size(),issueStart=issues.size();
+        try{
+            if(Files.size(path)>limits.maxArchiveBytes())throw new LimitException("Compressed archive size limit reached");
+            scanArchive(path,label,hash(path),0,jars,issues,budget,instructions);
+        }catch(IOException|RuntimeException e){
+            jars.subList(start,jars.size()).clear();issues.subList(issueStart,issues.size()).clear();retainedBytes-=budget.retained;
+            issues.add(new ScanIssue("LP-INPUT-001",label,"Analysis incomplete: "+Objects.toString(e.getMessage(),"Invalid archive")+"; inspected entries="+budget.entries+", classes="+budget.classes+", references="+budget.references+". Remaining symbols and entries were not analyzed."));
+            if(e instanceof LimitException||e instanceof SymbolLimit)try(ZipFile zip=ArchiveSafety.open(path,limits.maxEntries())){
+                for(var entries=zip.entries();entries.hasMoreElements();)validateEntry(entries.nextElement().getName());
+                ZipEntry mf=zip.getEntry("META-INF/MANIFEST.MF");if(mf!=null)try(InputStream in=zip.getInputStream(mf)){
+                    Map<String,String> metadata=ManifestMetadata.read(in);metadata.put("Metadata-Origin","Physical manifest; compatibility analysis incomplete");
+                    jars.add(new JarInventory(label,hash(path),metadata,Map.of(),List.of()));
+                }
+            }catch(IOException ignored){}
+        }
     }
-    private record Candidate(int version,ClassInfo info) {}
-    private void scanArchive(InputStream raw,String label,String hash,int depth,List<JarInventory> jars,List<ScanIssue> issues,Budget budget)throws IOException {
-        if(depth>limits.maxDepth())throw new LimitException("Nested archive depth exceeds limit: "+label);
-        Map<String,String> manifest=new TreeMap<>(String.CASE_INSENSITIVE_ORDER);Map<String,List<Candidate>> candidates=new TreeMap<>();List<String> signatures=new ArrayList<>(),entrypoints=new ArrayList<>();Set<String> names=new HashSet<>();
-        PushbackInputStream peek=new PushbackInputStream(new BufferedInputStream(raw),4);byte[] magic=peek.readNBytes(4);peek.unread(magic);
-        if(magic.length!=4||magic[0]!='P'||magic[1]!='K'|| !((magic[2]==3&&magic[3]==4)||(magic[2]==5&&magic[3]==6)))throw new IOException("Invalid ZIP signature");
-        try(ZipInputStream zip=new ZipInputStream(peek)) {
-            ZipEntry entry;
-            while((entry=zip.getNextEntry())!=null){
-                if(++budget.entries>limits.maxEntries())throw new LimitException("Archive entry count exceeds limit");
-                String name=entry.getName();validateEntry(name);
-                if(!names.add(name))throw new IOException("Duplicate archive entry: "+name);
-                if(entry.isDirectory()){zip.closeEntry();continue;}
-                if(entry.getSize()>limits.maxEntryBytes())throw new LimitException("Archive entry exceeds size limit: "+name);
-                byte[] data=readBounded(zip,budget);
-                if(entry.getCompressedSize()>0&&data.length>1024*1024&&data.length/entry.getCompressedSize()>200)throw new LimitException("Archive compression ratio exceeds limit: "+name);
-                String lower=name.toLowerCase(Locale.ROOT);
-                if(lower.equals("meta-inf/manifest.mf")){
-                    Manifest parsed=new Manifest(new ByteArrayInputStream(data));parsed.getMainAttributes().forEach((key,value)->mergeMetadata(manifest,key.toString(),value.toString()));
-                }else if((lower.contains("corda") && (lower.endsWith("version.properties")||lower.endsWith("build-info.properties")))){
-                    if(data.length>65536)throw new IOException("Version metadata exceeds size limit");
-                    Properties properties=new Properties();properties.load(new ByteArrayInputStream(data));
-                    for(String key:List.of("Corda-Release-Version","Corda-Platform-Version","Corda-Vendor")){String alias=switch(key){case "Corda-Release-Version"->"releaseVersion";case "Corda-Platform-Version"->"platformVersion";default->"vendor";};String value=properties.getProperty(key,properties.getProperty(alias,properties.getProperty(key.equals("Corda-Release-Version")?"version":key.equals("Corda-Platform-Version")?"platform.version":"vendor")));if(value!=null&&value.length()<=128){mergeMetadata(manifest,key,value.strip());manifest.put("Metadata-Origin",name);}}
-                }else if(Set.of("META-INF/services/net.corda.core.contracts.Contract","META-INF/services/net.corda.core.flows.FlowLogic").contains(name)){
-                    if(data.length>65536)throw new IOException("CorDapp service metadata exceeds size limit");
-                    for(String line:new String(data,java.nio.charset.StandardCharsets.UTF_8).split("\\R")){String provider=line.split("#",2)[0].strip();if(provider.matches("[A-Za-z_$][A-Za-z0-9_$.]*"))entrypoints.add(provider.replace('.','/'));}
-                }else if(lower.endsWith(".jar")){
-                    try{validateZipEnd(data);scanArchive(new ByteArrayInputStream(data),label+"!/"+name,hash(new ByteArrayInputStream(data)),depth+1,jars,issues,budget);}
-                    catch(LimitException e){throw e;}catch(IOException|RuntimeException e){issues.add(new ScanIssue("LP-INPUT-001",label+"!/"+name,"Cannot inventory nested archive: "+e.getMessage()));}
-                }else if(lower.endsWith(".class")) {
-                    if(++budget.classes>limits.maxClasses())throw new LimitException("Class count exceeds limit");
+    private record Candidate(int version,ClassInfo info){}
+    private void scanArchive(Path file,String label,String hash,int depth,List<JarInventory> jars,List<ScanIssue> issues,Budget budget,boolean instructions)throws IOException {
+        if(depth>limits.maxDepth())throw new LimitException("Nested archive depth limit reached");
+        reserve(budget,256,label,hash);
+        Map<String,String> manifest=new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        Map<String,Candidate> candidates=new TreeMap<>();List<String> signatures=new ArrayList<>(),entrypoints=new ArrayList<>();Set<String> names=new HashSet<>();
+        try(ZipFile zip=ArchiveSafety.open(file,limits.maxEntries())){
+            ZipEntry mf=zip.getEntry("META-INF/MANIFEST.MF");if(mf!=null)try(InputStream in=zip.getInputStream(mf)){manifest.putAll(ManifestMetadata.read(in));}
+            boolean multi="true".equalsIgnoreCase(manifest.get("Multi-Release"));
+            for(var enumeration=zip.entries();enumeration.hasMoreElements();){
+                ZipEntry entry=enumeration.nextElement();String name=entry.getName(),lower=name.toLowerCase(Locale.ROOT);
+                if(++budget.entries>limits.maxEntries())throw new LimitException("Archive entry count limit reached");
+                validateEntry(name);if(!names.add(name))throw new IOException("Duplicate archive entry");
+                if(entry.isDirectory()||lower.equals("meta-inf/manifest.mf"))continue;
+                if(entry.getSize()<0||entry.getSize()>limits.maxEntryBytes())throw new LimitException("Entry size limit reached: "+name);
+                if(entry.getCompressedSize()>0&&entry.getSize()>1024*1024&&entry.getSize()/entry.getCompressedSize()>200)throw new LimitException("Archive compression ratio limit reached: "+name);
+                if(lower.endsWith(".jar")){
+                    if(++budget.nested>128)throw new LimitException("Nested archive count limit reached");
+                    if(depth>=limits.maxDepth())throw new LimitException("Nested archive depth limit reached");
+                    Path temporary=Files.createTempFile("ledger-preflight-", ".archive",PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+                    try{
+                        try(InputStream in=zip.getInputStream(entry);OutputStream out=Files.newOutputStream(temporary)){copyBounded(in,out,budget,limits.maxEntryBytes());}
+                        try{scanArchive(temporary,label+"!/"+name,hash(temporary),depth+1,jars,issues,budget,instructions);}
+                        catch(LimitException|SymbolLimit e){throw e;}
+                        catch(IOException|RuntimeException e){String message="Nested archive incomplete: "+e.getMessage();reserve(budget,128,label+"!/"+name,message);issues.add(new ScanIssue("LP-INPUT-001",label+"!/"+name,message));}
+                    }finally{Files.deleteIfExists(temporary);}
+                }else if(lower.endsWith(".class")){
+                    if(++budget.classes>limits.maxClasses())throw new LimitException("Class count limit reached");
                     int version=0;String logical=name;
                     if(name.startsWith("META-INF/versions/")){
-                        String remainder=name.substring(18);int slash=remainder.indexOf('/');
-                        if(slash<0)throw new IOException("Malformed multi-release entry: "+name);
-                        try{version=Integer.parseInt(remainder.substring(0,slash));}catch(NumberFormatException e){throw new IOException("Malformed multi-release version: "+name,e);}
-                        logical=remainder.substring(slash+1);if(version<9||version>17)continue;
+                        String tail=name.substring(18);int slash=tail.indexOf('/');if(slash<0)throw new IOException("Malformed multi-release entry");
+                        version=Integer.parseInt(tail.substring(0,slash));logical=tail.substring(slash+1);if(!multi||version<9||version>17)continue;
                     }
-                    try {
-                        ClassInfo info=parse(data,budget);
+                    int classLimit=Math.min(2*1024*1024,limits.maxEntryBytes());
+                    if(entry.getSize()>classLimit)throw new LimitException("Class byte size limit reached: "+name);
+                    byte[] data=read(zip,entry,budget,classLimit);
+                    try{
+                        ClassInfo info=parse(data,budget,instructions);
                         if(!logical.equals(info.name()+".class"))throw new IOException("Class name does not match archive path: "+name);
-                        candidates.computeIfAbsent(info.name(),key->new ArrayList<>()).add(new Candidate(version,info));
-                    }catch(IllegalArgumentException|ArrayIndexOutOfBoundsException e){throw new IOException("Malformed/unsupported class "+name+": "+e.getMessage(),e);}
-                    catch(StackOverflowError e){throw new IOException("Class constant nesting exceeds parser stack capacity: "+name,e);}
-                }else if(lower.matches("meta-inf/[^/]+\\.(sf|rsa|dsa|ec)"))signatures.add(name);
-                zip.closeEntry();
+                        Candidate prior=candidates.get(info.name());if(prior==null||version>prior.version())candidates.put(info.name(),new Candidate(version,info));
+                    }catch(StackOverflowError e){throw new IOException("Class constant nesting exceeds parser stack capacity: "+name);}
+                }else if(lower.contains("corda")&&(lower.endsWith("version.properties")||lower.endsWith("build-info.properties"))){
+                    Properties p=new Properties();p.load(new ByteArrayInputStream(read(zip,entry,budget,65536)));
+                    if(!manifest.containsKey("Application-ID"))for(String key:List.of("Corda-Release-Version","Corda-Platform-Version","Corda-Vendor")){
+                        String alias=key.equals("Corda-Release-Version")?"releaseVersion":key.equals("Corda-Platform-Version")?"platformVersion":"vendor";
+                        String value=p.getProperty(key,p.getProperty(alias,p.getProperty(key.equals("Corda-Release-Version")?"version":key.equals("Corda-Platform-Version")?"platform.version":"vendor")));
+                        if(value!=null&&value.length()<=128)mergeMetadata(manifest,key,value.strip());
+                    }
+                }else if(Set.of("META-INF/services/net.corda.core.contracts.Contract","META-INF/services/net.corda.core.flows.FlowLogic").contains(name)){
+                    for(String line:new String(read(zip,entry,budget,65536),java.nio.charset.StandardCharsets.UTF_8).split("\\R")){
+                        String provider=line.split("#",2)[0].strip().replace('.','/');if(!provider.isBlank()){reserve(budget,64,provider);entrypoints.add(provider);}
+                    }
+                }else{
+                    try(InputStream in=zip.getInputStream(entry)){copyBounded(in,OutputStream.nullOutputStream(),budget,limits.maxEntryBytes());}
+                    if(lower.matches("meta-inf/[^/]+\\.(sf|rsa|dsa|ec)")){reserve(budget,64,name);signatures.add(name);}
+                }
             }
         }
-        boolean multi=manifest.entrySet().stream().anyMatch(e->e.getKey().equalsIgnoreCase("Multi-Release")&&e.getValue().equalsIgnoreCase("true"));
-        Map<String,ClassInfo> classes=new TreeMap<>();
-        candidates.forEach((name,values)->values.stream().filter(c->c.version()==0||multi).max(Comparator.comparingInt(Candidate::version)).ifPresent(c->classes.put(name,c.info())));
-        // Bundled library versions are fallback evidence, not the capsule's own release identity.
+        Map<String,ClassInfo> classes=new TreeMap<>();candidates.forEach((k,v)->classes.put(k,v.info()));
         boolean ownRelease=List.of("Corda-Release-Version","Corda-Version","Application-Version").stream().anyMatch(manifest::containsKey);
         boolean ownPlatform=manifest.containsKey("Corda-Platform-Version")||manifest.containsKey("Platform-Version");
         for(JarInventory nested:jars)if(nested.path().startsWith(label+"!/"))for(String key:List.of("Corda-Release-Version","Corda-Platform-Version","Corda-Vendor")){
-            if(key.equals("Corda-Release-Version")&&ownRelease||key.equals("Corda-Platform-Version")&&ownPlatform)continue;
-            if(nested.manifest().getOrDefault("Metadata-Conflict","").contains(key))manifest.merge("Metadata-Conflict",key,(a,b)->a.contains(b)?a:a+", "+b);
-            String value=nested.manifest().get(key);if(value!=null){mergeMetadata(manifest,key,value);manifest.putIfAbsent("Metadata-Origin",nested.path());}
+            if(key.equals("Corda-Release-Version")&&ownRelease||key.equals("Corda-Platform-Version")&&ownPlatform||key.equals("Corda-Vendor")&&manifest.containsKey(key))continue;
+            String value=nested.manifest().get(key);if(value!=null)mergeMetadata(manifest,key,value);
         }
-        Collections.sort(signatures);
-        jars.add(new JarInventory(label,hash,Collections.unmodifiableMap(manifest),Collections.unmodifiableMap(classes),List.copyOf(signatures),entrypoints.stream().filter(classes::containsKey).distinct().sorted().toList()));
+        for(var attribute:manifest.entrySet())reserve(budget,96,attribute.getKey(),attribute.getValue());
+        Collections.sort(signatures);jars.add(new JarInventory(label,hash,Collections.unmodifiableMap(manifest),Collections.unmodifiableMap(classes),List.copyOf(signatures),entrypoints.stream().filter(classes::containsKey).distinct().sorted().toList()));
     }
-    private static void mergeMetadata(Map<String,String> manifest,String key,String value){String previous=manifest.putIfAbsent(key,value);if(previous!=null&&!previous.equals(value)&&key.contains("Version"))manifest.merge("Metadata-Conflict",key,(a,b)->a.contains(b)?a:a+", "+b); }
+    private static void mergeMetadata(Map<String,String> map,String key,String value){String prior=map.putIfAbsent(key,value);if(prior!=null&&!prior.equals(value)&&key.contains("Version"))map.merge("Metadata-Conflict",key,(a,b)->a.contains(b)?a:a+", "+b);}
     public static void validateEntry(String name)throws IOException {
         if(name.isEmpty()||name.length()>4096||name.startsWith("/")||name.contains("\\")||name.contains(":"))throw new IOException("Unsafe archive entry path");
         for(String part:name.split("/"))if(part.equals("..")||part.equals("."))throw new IOException("Archive path traversal rejected");
         for(int i=0;i<name.length();i++)if(Character.isISOControl(name.charAt(i)))throw new IOException("Control character in archive entry");
     }
-    private static void validateZipEnd(byte[] bytes)throws IOException {
-        for(int offset=bytes.length-22;offset>=Math.max(0,bytes.length-65557);offset--){
-            if(bytes[offset]==0x50&&bytes[offset+1]==0x4b&&bytes[offset+2]==5&&bytes[offset+3]==6){
-                int comment=(bytes[offset+20]&255)|((bytes[offset+21]&255)<<8);
-                if(offset+22+comment!=bytes.length)continue;
-                long directorySize=u32(bytes,offset+12),directoryOffset=u32(bytes,offset+16);
-                int entryCount=u16(bytes,offset+10);
-                if(u16(bytes,offset+4)!=0||u16(bytes,offset+6)!=0||u16(bytes,offset+8)!=entryCount||entryCount==65535||directorySize==0xffffffffL||directoryOffset==0xffffffffL)throw new IOException("Nested split/ZIP64 archive is unsupported");
-                if(directoryOffset+directorySize!=offset)throw new IOException("Invalid nested ZIP central directory bounds");
-                int cursor=(int)directoryOffset;
-                for(int entry=0;entry<entryCount;entry++){
-                    if(cursor+46>offset||u32(bytes,cursor)!=0x02014b50L)throw new IOException("Invalid nested ZIP central directory entry");
-                    long local=u32(bytes,cursor+42);
-                    if(local+4>directoryOffset||u32(bytes,(int)local)!=0x04034b50L)throw new IOException("Invalid nested ZIP local entry offset");
-                    cursor+=46+u16(bytes,cursor+28)+u16(bytes,cursor+30)+u16(bytes,cursor+32);
-                }
-                if(cursor!=offset)throw new IOException("Invalid nested ZIP central directory length");
-                return;
-            }
+    private void copyBounded(InputStream in,OutputStream out,Budget budget,int limit)throws IOException {
+        byte[] buffer=new byte[8192];long total=0;int count;
+        while((count=in.read(buffer))!=-1){total+=count;budget.expanded+=count;if(total>limit||budget.expanded>limits.maxExpandedBytes())throw new LimitException("Expanded byte limit reached");out.write(buffer,0,count);}
+    }
+    private byte[] read(ZipFile zip,ZipEntry entry,Budget budget,int limit)throws IOException {
+        if(entry.getSize()<0||entry.getSize()>limit)throw new LimitException("Entry byte limit reached: "+entry.getName());
+        byte[] data=new byte[(int)entry.getSize()];
+        try(InputStream in=zip.getInputStream(entry)){
+            int at=0;while(at<data.length){int n=in.read(data,at,data.length-at);if(n<0)throw new IOException("Truncated entry");at+=n;budget.expanded+=n;if(budget.expanded>limits.maxExpandedBytes())throw new LimitException("Expanded byte limit reached");}
+            if(in.read()!=-1)throw new IOException("Entry size changed");return data;
         }
-        throw new IOException("Truncated nested ZIP: end-of-central-directory record missing");
     }
-    private static int u16(byte[] bytes,int offset){return (bytes[offset]&255)|((bytes[offset+1]&255)<<8);}
-    private static long u32(byte[] bytes,int offset){return (bytes[offset]&255L)|((bytes[offset+1]&255L)<<8)|((bytes[offset+2]&255L)<<16)|((bytes[offset+3]&255L)<<24);}
-    private byte[] readBounded(InputStream in,Budget budget)throws IOException {
-        ByteArrayOutputStream output=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int count,total=0;
-        while((count=in.read(buffer))!=-1){total+=count;budget.expanded+=count;if(total>limits.maxEntryBytes()||budget.expanded>limits.maxExpandedBytes())throw new LimitException("Expanded archive size exceeds limit");output.write(buffer,0,count);}
-        return output.toByteArray();
-    }
-    private String hash(InputStream input)throws IOException {
-        try{MessageDigest digest=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[65536];int count;long total=0;while((count=input.read(buffer))!=-1){if((total+=count)>limits.maxArchiveBytes())throw new LimitException("Archive exceeds compressed size limit");digest.update(buffer,0,count);}return HexFormat.of().formatHex(digest.digest());}
+    private String hash(Path path)throws IOException {
+        try(InputStream input=Files.newInputStream(path)){MessageDigest digest=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[65536];int n;long total=0;while((n=input.read(buffer))!=-1){if((total+=n)>limits.maxArchiveBytes())throw new LimitException("Compressed archive size limit reached");digest.update(buffer,0,n);}return HexFormat.of().formatHex(digest.digest());}
         catch(NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
     }
-    private ClassInfo parse(byte[] bytes,Budget budget)throws IOException {
-        ClassReader reader=new ClassReader(bytes);List<Member> members=new ArrayList<>();Set<Reference> references=new LinkedHashSet<>();
+    private ClassInfo parse(byte[] bytes,Budget budget,boolean instructions)throws IOException {
+        ClassReader reader=new ClassReader(bytes);reserve(budget,160,reader.getClassName(),reader.getSuperName());String[] interfaces=reader.getInterfaces();for(String face:interfaces)reserve(budget,64,face);List<Member> members=new ArrayList<>();Set<Reference> references=new LinkedHashSet<>();
         ClassVisitor visitor=new ClassVisitor(Opcodes.ASM9){
-            void add(Reference reference){if(references.add(reference)&&++budget.references>limits.maxReferences())throw new IllegalArgumentException("Reference count exceeds limit");}
-            void type(String source,Type type){if(type.getSort()==Type.METHOD){type(source,type.getReturnType());for(Type arg:type.getArgumentTypes())type(source,arg);}else if(type.getSort()==Type.ARRAY)type(source,type.getElementType());else if(type.getSort()==Type.OBJECT)add(new Reference(source,"CLASS",type.getInternalName(),"","",0));}
-            void constant(String source,Object value){if(value instanceof Type t)type(source,t);else if(value instanceof Handle h){int tag=h.getTag();int opcode=switch(tag){case Opcodes.H_GETFIELD->Opcodes.GETFIELD;case Opcodes.H_GETSTATIC->Opcodes.GETSTATIC;case Opcodes.H_PUTFIELD->Opcodes.PUTFIELD;case Opcodes.H_PUTSTATIC->Opcodes.PUTSTATIC;case Opcodes.H_INVOKESTATIC->Opcodes.INVOKESTATIC;case Opcodes.H_INVOKEINTERFACE->Opcodes.INVOKEINTERFACE;case Opcodes.H_INVOKESPECIAL,Opcodes.H_NEWINVOKESPECIAL->Opcodes.INVOKESPECIAL;default->Opcodes.INVOKEVIRTUAL;};add(new Reference(source,tag<=4?"FIELD":"METHOD",h.getOwner(),h.getName(),h.getDesc(),opcode));type(source,Type.getType(h.getDesc()));}else if(value instanceof ConstantDynamic c){constant(source,c.getBootstrapMethod());type(source,Type.getType(c.getDescriptor()));for(int i=0;i<c.getBootstrapMethodArgumentCount();i++)constant(source,c.getBootstrapMethodArgument(i));}}
+            void add(Reference reference){if(references.add(reference)){reserve(budget,160,reference.sourceMethod(),reference.owner(),reference.name(),reference.descriptor());if(++budget.references>limits.maxReferences())throw new SymbolLimit("Reference count limit reached");}}
+            void type(String source,Type type){if(!instructions)return;if(type.getSort()==Type.METHOD){type(source,type.getReturnType());for(Type arg:type.getArgumentTypes())type(source,arg);}else if(type.getSort()==Type.ARRAY)type(source,type.getElementType());else if(type.getSort()==Type.OBJECT)add(new Reference(source,"CLASS",type.getInternalName(),"","",0));}
+            void constant(String source,Object value){if(!instructions)return;if(value instanceof Type t)type(source,t);else if(value instanceof Handle h){int tag=h.getTag();int opcode=switch(tag){case Opcodes.H_GETFIELD->Opcodes.GETFIELD;case Opcodes.H_GETSTATIC->Opcodes.GETSTATIC;case Opcodes.H_PUTFIELD->Opcodes.PUTFIELD;case Opcodes.H_PUTSTATIC->Opcodes.PUTSTATIC;case Opcodes.H_INVOKESTATIC->Opcodes.INVOKESTATIC;case Opcodes.H_INVOKEINTERFACE->Opcodes.INVOKEINTERFACE;case Opcodes.H_INVOKESPECIAL,Opcodes.H_NEWINVOKESPECIAL->Opcodes.INVOKESPECIAL;default->Opcodes.INVOKEVIRTUAL;};add(new Reference(source,tag<=4?"FIELD":"METHOD",h.getOwner(),h.getName(),h.getDesc(),opcode));type(source,Type.getType(h.getDesc()));}else if(value instanceof ConstantDynamic c){constant(source,c.getBootstrapMethod());type(source,Type.getType(c.getDescriptor()));for(int i=0;i<c.getBootstrapMethodArgumentCount();i++)constant(source,c.getBootstrapMethodArgument(i));}}
             @Override public void visit(int version,int access,String name,String signature,String parent,String[] interfaces){if(parent!=null)type("<class>",Type.getObjectType(parent));for(String face:interfaces)type("<class>",Type.getObjectType(face));}
-            @Override public FieldVisitor visitField(int access,String name,String descriptor,String signature,Object value){members.add(new Member("FIELD",name,descriptor,access));type("<field:"+name+">",Type.getType(descriptor));constant("<field:"+name+">",value);return null;}
+            @Override public FieldVisitor visitField(int access,String name,String descriptor,String signature,Object value){reserve(budget,96,name,descriptor);members.add(new Member("FIELD",name,descriptor,access));type("<field:"+name+">",Type.getType(descriptor));constant("<field:"+name+">",value);return null;}
             @Override public MethodVisitor visitMethod(int access,String name,String descriptor,String signature,String[] exceptions){
-                members.add(new Member("METHOD",name,descriptor,access));String source=name+descriptor;type(source,Type.getMethodType(descriptor));if(exceptions!=null)for(String exception:exceptions)type(source,Type.getObjectType(exception));
+                reserve(budget,96,name,descriptor);members.add(new Member("METHOD",name,descriptor,access));String source=name+descriptor;type(source,Type.getMethodType(descriptor));if(exceptions!=null)for(String exception:exceptions)type(source,Type.getObjectType(exception));
                 return new MethodVisitor(Opcodes.ASM9){
                     @Override public void visitMethodInsn(int opcode,String owner,String method,String desc,boolean isInterface){add(new Reference(source,"METHOD",owner,method,desc,opcode));type(source,Type.getMethodType(desc));}
                     @Override public void visitFieldInsn(int opcode,String owner,String field,String desc){add(new Reference(source,"FIELD",owner,field,desc,opcode));type(source,Type.getType(desc));}
@@ -184,9 +195,9 @@ public final class BytecodeScanner {
                 };
             }
         };
-        reader.accept(visitor,ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);
+        reader.accept(visitor,ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES|(instructions?0:ClassReader.SKIP_CODE));
         members.sort(Comparator.comparing(Member::kind).thenComparing(Member::name).thenComparing(Member::descriptor));
         List<Reference> sorted=references.stream().sorted(Comparator.comparing(Reference::sourceMethod).thenComparing(Reference::symbol).thenComparing(Reference::kind)).toList();
-        return new ClassInfo(reader.getClassName(),reader.getSuperName(),List.of(reader.getInterfaces()),reader.getAccess(),reader.readUnsignedShort(6),List.copyOf(members),sorted);
+        return new ClassInfo(reader.getClassName(),reader.getSuperName(),List.of(interfaces),reader.getAccess(),reader.readUnsignedShort(6),List.copyOf(members),sorted);
     }
 }

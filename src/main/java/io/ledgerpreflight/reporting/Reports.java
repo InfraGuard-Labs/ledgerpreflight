@@ -169,7 +169,7 @@ public final class Reports {
     private static String jsonView(Object value) { try{return json(value);}catch(IOException e){throw new IllegalStateException("Generated report evidence could not be serialized",e);} }
     private static String escape(String text){return Sanitizer.redact(text).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;").replace("'","&#39;");}
     public static Map<String,String> files(Assessment a)throws IOException {
-        Map<String,String> out=new TreeMap<>();out.put("assessment.json",json(a));out.put("report.json",json(a));out.put("report.html",html(a));out.put("findings.json",json(a.findings()));out.put("summary.txt",terminal(a));
+        Map<String,String> out=new TreeMap<>();String assessmentJson=json(a);out.put("assessment.json",assessmentJson);out.put("report.json",assessmentJson);out.put("report.html",html(a));out.put("findings.json",json(a.findings()));out.put("summary.txt",terminal(a));
         for(var e:a.evidence().entrySet()) if(!e.getKey().equals("sanitized-node.conf"))out.put(e.getKey()+".json",json(e.getValue()));
         out.put("sanitized-node.conf",Sanitizer.redact(Objects.toString(a.evidence().get("sanitized-node.conf"),"# unavailable\n")));
         out.put("reproduction.txt","ledger-preflight assess --node /node --upgrade-kit /upgrade-kit --output /reports --offline\nSupply optional TVU and verifier evidence with --tvu-results and --verifier-classpath. Inputs are never bundled.\n");
@@ -179,7 +179,11 @@ public final class Reports {
         Path root=directory.toAbsolutePath().normalize();checkNoSymlink(root);Files.createDirectories(root);
         for(var entry:files.entrySet()){
             Path p=root.resolve(entry.getKey()).normalize();if(!p.startsWith(root))throw new IOException("Unsafe report path");checkNoSymlink(p);
-            Files.writeString(p,entry.getValue(),StandardCharsets.UTF_8,StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING,LinkOption.NOFOLLOW_LINKS);
+            Path pending=Files.createTempFile(root,".ledger-preflight-report-",".tmp");
+            try{
+                Files.writeString(pending,entry.getValue(),StandardCharsets.UTF_8,StandardOpenOption.TRUNCATE_EXISTING,LinkOption.NOFOLLOW_LINKS);
+                checkNoSymlink(p);Files.move(pending,p,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
+            }finally{Files.deleteIfExists(pending);}
         }
     }
     public static void checkNoSymlink(Path path)throws IOException {for(Path p=path.toAbsolutePath();p!=null;p=p.getParent())if(Files.isSymbolicLink(p))throw new IOException("Symbolic-link path rejected");}

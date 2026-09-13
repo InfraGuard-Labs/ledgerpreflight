@@ -17,7 +17,7 @@ final class DiscoverySession {
         var node=found.nodes().get(selection);Path config=o.nodeConf();
         if(config==null&&node.configs().size()==1)config=node.configs().get(0);
         else if(config==null&&node.configs().size()>1){int n=terminal.choose("Select the active node configuration",node.configs().stream().map(p->node.root().relativize(p).toString()).toList());if(n<0)return null;config=node.configs().get(n);}
-        var scanner=new ArtifactDiscovery();var current=scanner.scan(node.root());var target=scanner.scan(o.kit());
+        var scanner=new ArtifactDiscovery();var current=scanner.scanLayout(node.root());var target=scanner.scanLayout(o.kit());
         Path runtime=o.targetCorda(),tvu=o.tvuJar();
         if(runtime==null&&Discovery.topLevel(Discovery.select(target,"RUNTIME")).size()>1){runtime=selectArtifact(o.kit(),Discovery.topLevel(Discovery.select(target,"RUNTIME")),"Select target Corda runtime",terminal);if(runtime==null)return null;}
         if(tvu==null&&Discovery.topLevel(Discovery.select(target,"TVU")).size()>1){tvu=selectArtifact(o.kit(),Discovery.topLevel(Discovery.select(target,"TVU")),"Select target TVU artifact",terminal);if(tvu==null)return null;}
@@ -38,7 +38,7 @@ final class DiscoverySession {
             "\nTarget       "+human(model.targetVersion())+" · Platform "+human(model.targetPlatform())+
             "\nJava         "+human(HostEnvironment.inspect(o.hostEnvironment()).currentJava())+
             "\nDatabase     "+settings.getOrDefault("databaseVendor","Unknown")+"\n"+schemaLines+
-            "\nCorDapp JARs  "+model.currentCordappJars()+" current → "+model.targetCordappJars()+" target"+
+            "\nCorDapps     "+model.currentCordappJars()+" current · "+model.targetCordappJars()+" target"+
             "\nTVU          "+(validators.size()==1?"Found":validators.isEmpty()?"Not found":"Multiple · select intended artifact")+"\n";
         if(model.sourceVersion().equals("unknown"))summary+="\nCurrent Corda release could not be determined from one runtime's metadata.\n";
         if(model.targetVersion().equals("unknown"))summary+="\nTarget Corda release could not be determined from one runtime's metadata.\n";

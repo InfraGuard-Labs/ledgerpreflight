@@ -25,14 +25,14 @@ expect() {
   fi
 }
 for label in repeat-a repeat-b; do
-  expect 2 java -Xmx512m -jar /tmp/validation.jar assess \
+  expect 2 java -Xmx256m -jar /tmp/validation.jar assess \
     --node /tmp/validation-inputs/replay/current-node --upgrade-kit /tmp/validation-inputs/replay/upgrade-kit \
     --tvu-results /tmp/validation-inputs/replay/tvu.log --tvu-results /tmp/validation-inputs/replay/errors.zip \
     --verifier-classpath /tmp/validation-inputs/replay/classpath.txt --output "/dist/offline/$label" --offline > "/dist/offline/$label.txt"
 done
-expect 1 java -jar /tmp/validation.jar assess --node /tmp/validation-inputs/clean/current-node --upgrade-kit /tmp/validation-inputs/clean/upgrade-kit --output /dist/offline/static --offline > /dist/offline/static.txt
-expect 0 java -jar /tmp/validation.jar assess --node /tmp/validation-inputs/clean/current-node --upgrade-kit /tmp/validation-inputs/clean/upgrade-kit --tvu-results /tmp/validation-inputs/clean/tvu.log --output /dist/offline/ready --offline > /dist/offline/ready.txt
+expect 1 java -Xmx256m -jar /tmp/validation.jar assess --node /tmp/validation-inputs/clean/current-node --upgrade-kit /tmp/validation-inputs/clean/upgrade-kit --output /dist/offline/static --offline > /dist/offline/static.txt
+expect 0 java -Xmx256m -jar /tmp/validation.jar assess --node /tmp/validation-inputs/clean/current-node --upgrade-kit /tmp/validation-inputs/clean/upgrade-kit --tvu-results /tmp/validation-inputs/clean/tvu.log --output /dist/offline/ready --offline > /dist/offline/ready.txt
 rm -f /dist/offline/repeat-a/support.zip
-java -jar /tmp/validation.jar support-bundle --assessment /dist/offline/repeat-a --output /dist/offline/repeat-a/support.zip
+java -Xmx256m -jar /tmp/validation.jar support-bundle --assessment /dist/offline/repeat-a --output /dist/offline/repeat-a/support.zip
 printf 'Ubuntu %s %s: packaged launcher, tests, replay, readiness, repeat and support checks passed.\n' "$VERSION_ID" "$(uname -m)" > /dist/linux-validation.txt
 cat /dist/linux-validation.txt

@@ -2,7 +2,7 @@
 import pathlib,subprocess,json,hashlib,zipfile,xml.etree.ElementTree as ET
 r=pathlib.Path('/dist');out=r/'smoke';out.mkdir(exist_ok=True);jar=r/'ledger-preflight-0.1.0.jar';f=r/'synthetic';results={}
 def run(name,args,expected,parse=False):
-    p=subprocess.run(['java','-jar',str(jar),*map(str,args)],capture_output=True,timeout=45)
+    p=subprocess.run(['java','-Xmx256m','-jar',str(jar),*map(str,args)],capture_output=True,timeout=45)
     (out/(name+'.stdout')).write_bytes(p.stdout);(out/(name+'.stderr')).write_bytes(p.stderr)
     assert p.returncode==expected,(name,p.returncode,p.stderr.decode(errors='replace'))
     value=json.loads(p.stdout) if parse else None

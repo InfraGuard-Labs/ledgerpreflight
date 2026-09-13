@@ -14,4 +14,4 @@ RUN groupadd --gid 10001 ledger && useradd --uid 10001 --gid 10001 --create-home
 WORKDIR /app
 COPY --from=build /workspace/build/libs/ledger-preflight-0.1.0.jar /app/ledger-preflight.jar
 USER 10001:10001
-ENTRYPOINT ["java", "-Xmx512m", "-jar", "/app/ledger-preflight.jar"]
+ENTRYPOINT ["java", "-Xmx256m", "-jar", "/app/ledger-preflight.jar"]

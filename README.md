@@ -20,11 +20,11 @@ upgrade-kit/
 └── legacy-jars/   optional, when required
 ```
 
-Exact filenames are not required: LedgerPreflight inspects manifest and content evidence. Supply a consistent node copy or snapshot, read access to both directories, and a separate writable report directory. Static assessment makes no database connections and changes no node files.
+Only physical artifacts directly inside node/cordapps and upgrade-kit/cordapps form the default active CorDapp sets. Backup siblings and drivers do not count as CorDapps. Exact filenames are not required: LedgerPreflight inspects manifest and content evidence. Supply a consistent node copy or snapshot, read access to both directories, and a separate writable report directory. Static assessment makes no database connections and changes no node files.
 
 ## Run
 
-The Linux x86_64 package bundles private Java 17 and leaves system Java unchanged. It can assess a Java 8 node before the target Java upgrade. The validation matrix covers Ubuntu 18.04, 20.04, 22.04 and 24.04.
+The Linux x86_64 package bundles private Java 17 and leaves system Java unchanged. The default heap is 256 MiB; allow 512 MiB of process memory and up to 128 MiB of private temporary storage for sequential nested-archive inspection. Inputs remain read-only. It can assess a Java 8 node before the target Java upgrade. The validation matrix covers Ubuntu 18.04, 20.04, 22.04 and 24.04.
 
 Verify the package against its accompanying `SHA256SUMS`, then:
 

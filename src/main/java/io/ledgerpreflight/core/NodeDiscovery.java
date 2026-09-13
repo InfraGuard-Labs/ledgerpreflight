@@ -49,6 +49,7 @@ public final class NodeDiscovery {
         }
         var hashes=target.stream().filter(t->t.sha256().equals(source.sha256())).toList();if(!hashes.isEmpty())return hashes;
         // Exact class sets support renamed artifacts; overlapping utility packages alone do not.
-        return target.stream().filter(t->!source.classes().isEmpty()&&t.classes().keySet().equals(source.classes().keySet())).toList();
+        if(Discovery.attr(source,"Identity-Class-Names-Truncated").equals("true"))return List.of();
+        return target.stream().filter(t->!Discovery.attr(t,"Identity-Class-Names-Truncated").equals("true")&&!source.classes().isEmpty()&&t.classes().keySet().equals(source.classes().keySet())).toList();
     }
 }

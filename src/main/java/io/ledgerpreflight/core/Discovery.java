@@ -12,18 +12,20 @@ public final class Discovery {
     }
     public static String role(JarInventory j) {
         String path=j.path().toLowerCase(Locale.ROOT),main=(attr(j,"Main-Class")+" "+attr(j,"Application-Class")+" "+attr(j,"Start-Class")+" "+attr(j,"Application-ID")).toLowerCase(Locale.ROOT);
+        if(path.startsWith("drivers/")||attr(j,"Physical-Scope").equals("drivers"))return "DRIVER";
         if(path.startsWith("legacy-jars/"))return "LEGACY";
         if(path.startsWith("legacy-contracts/"))return "LEGACY_CONTRACT";
-        if(main.contains("net.corda.transactionvalidator.") || main.contains("net.corda.tools.transactionvalidator") || main.contains("net.corda.tools.transaction.validator") || j.classes().keySet().stream().anyMatch(c->c.startsWith("net/corda/transactionvalidator/")||c.startsWith("net/corda/tools/transactionvalidator/")||c.equals("net/corda/tools/TransactionValidator")))return "TVU";
+        if(!attr(j,"Cordapp-Contract-Name").isBlank()||!attr(j,"Cordapp-Workflow-Name").isBlank())return attr(j,"Physical-Scope").equals("root")?"SUPPORT":"CORDAPP";
+        if(attr(j,"TVU-Entry-Evidence").equals("true")||main.contains("net.corda.transactionvalidator.") || main.contains("net.corda.tools.transactionvalidator") || main.contains("net.corda.tools.transaction.validator") || j.classes().keySet().stream().anyMatch(c->c.startsWith("net/corda/transactionvalidator/")||c.startsWith("net/corda/tools/transactionvalidator/")||c.equals("net/corda/tools/TransactionValidator")))return "TVU";
         if(main.contains("verifier") || j.classes().containsKey("net/corda/verifier/Main"))return "VERIFIER";
         if(main.contains("net.corda.node.") || j.classes().containsKey("net/corda/node/Corda") || j.classes().containsKey("net/corda/node/internal/Node"))return "RUNTIME";
-        if(!attr(j,"Cordapp-Contract-Name").isBlank() || !attr(j,"Cordapp-Workflow-Name").isBlank())return "CORDAPP";
+        if(!j.cordappEntrypoints().isEmpty() || j.classes().keySet().stream().anyMatch(c->!c.startsWith("net/corda/core/")&&cordappType(c,j.classes(),new HashSet<>())))return attr(j,"Physical-Scope").equals("root")?"SUPPORT":"CORDAPP";
         if(j.classes().keySet().stream().anyMatch(c->c.startsWith("net/corda/core/")))return "RUNTIME_LIBRARY";
-        if(!j.cordappEntrypoints().isEmpty() || j.classes().keySet().stream().anyMatch(c->cordappType(c,j.classes(),new HashSet<>())))return "CORDAPP";
         if(path.startsWith("drivers/") || j.classes().values().stream().anyMatch(c->c.interfaces().contains("java/sql/Driver")))return "DRIVER";
         if(main.contains("shell"))return "SHELL";
         return "UNKNOWN";
     }
+    public static boolean cordappHeader(ClassInfo c){return java.util.stream.Stream.concat(java.util.stream.Stream.of(c.superName()),c.interfaces().stream()).filter(Objects::nonNull).anyMatch(x->Set.of("net/corda/core/contracts/Contract","net/corda/core/contracts/UpgradedContract","net/corda/core/contracts/ContractState","net/corda/core/flows/FlowLogic").contains(x));}
     private static boolean cordappType(String name,Map<String,ClassInfo> classes,Set<String> seen){
         if(name==null)return false;Deque<String> pending=new ArrayDeque<>();pending.add(name);
         while(!pending.isEmpty()){String next=pending.removeFirst();if(!seen.add(next))continue;
@@ -49,7 +51,7 @@ public final class Discovery {
     public static String attr(JarInventory j,String key){return j.manifest().entrySet().stream().filter(e->e.getKey().equalsIgnoreCase(key)).map(Map.Entry::getValue).findFirst().orElse("");}
     private static Map<String,String> safeManifest(Map<String,String> manifest) {
         Map<String,String> safe=new TreeMap<>();
-        Set<String> allowed=new TreeSet<>(String.CASE_INSENSITIVE_ORDER);allowed.addAll(List.of("Manifest-Version","Main-Class","Application-Class","Application-ID","Application-Version","Min-Java-Version","Corda-OpenCore-Version","Corda-Revision","Start-Class","Implementation-Version","Corda-Platform-Version","Platform-Version","Corda-Vendor","Implementation-Vendor","Metadata-Origin","Metadata-Conflict","Corda-Release-Version","Corda-Version","Multi-Release","Cordapp-Contract-Name","Cordapp-Contract-Version","Cordapp-Contract-Vendor","Cordapp-Workflow-Name","Cordapp-Workflow-Version","Cordapp-Workflow-Vendor","Min-Platform-Version","Target-Platform-Version"));
+        Set<String> allowed=new TreeSet<>(String.CASE_INSENSITIVE_ORDER);allowed.addAll(List.of("Physical-Scope","Identity-Class-Names-Truncated","TVU-Entry-Evidence","Manifest-Version","Main-Class","Application-Class","Application-ID","Application-Version","Min-Java-Version","Corda-OpenCore-Version","Corda-Revision","Start-Class","Implementation-Version","Corda-Platform-Version","Platform-Version","Corda-Vendor","Implementation-Vendor","Metadata-Origin","Metadata-Conflict","Corda-Release-Version","Corda-Version","Multi-Release","Cordapp-Contract-Name","Cordapp-Contract-Version","Cordapp-Contract-Vendor","Cordapp-Workflow-Name","Cordapp-Workflow-Version","Cordapp-Workflow-Vendor","Min-Platform-Version","Target-Platform-Version"));
         for(var e:manifest.entrySet())if(allowed.contains(e.getKey()))safe.put(e.getKey(),e.getValue());
         return safe;
     }

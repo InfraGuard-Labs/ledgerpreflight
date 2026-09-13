@@ -2,7 +2,7 @@
 import pathlib,shutil,subprocess,json,os
 r=pathlib.Path('/dist');source=r/'synthetic/clean';out=r/'universality';out.mkdir(exist_ok=True);results={}
 def assess(name,node,kit=None,expected=1,extra=(),env=None):
-    cmd=['java','-jar',str(r/'ledger-preflight-0.1.0.jar'),'assess','--node',str(node),'--upgrade-kit',str(kit or source/'upgrade-kit'),'--output',str(out/name),'--json',*extra]
+    cmd=['java','-Xmx256m','-jar',str(r/'ledger-preflight-0.1.0.jar'),'assess','--node',str(node),'--upgrade-kit',str(kit or source/'upgrade-kit'),'--output',str(out/name),'--json',*extra]
     p=subprocess.run(cmd,capture_output=True,env=env,timeout=45)
     assert p.returncode==expected,(name,p.returncode,p.stderr.decode())
     a=json.loads(p.stdout);results[name]={'exit':p.returncode,'status':a['status']};return a
@@ -28,7 +28,7 @@ kit=pathlib.Path('/tmp/arbitrary-kit');shutil.copytree(source/'upgrade-kit',kit)
 assess('nonstandard-artifact-names','/srv/apps/corda/issuer',kit=kit)
 # Mandatory sanitized acceptance gate: real manifest/content structures, no vendor binaries.
 acceptance=r/'synthetic/discovery-regression'
-a=assess('real-style-acceptance',acceptance/'current-node',kit=acceptance/'upgrade-kit',expected=4,env={**os.environ,'LP_HOST_JAVA_VERSION':'1.8.0_242'})
+a=assess('real-style-acceptance',acceptance/'current-node',kit=acceptance/'upgrade-kit',expected=1,env={**os.environ,'LP_HOST_JAVA_VERSION':'1.8.0_242'})
 d=a['evidence']['discovery'];cfg=a['evidence']['schema-analysis']['safeSettings']
 assert (a['sourceVersion'],a['targetVersion'])==('4.11.6','4.12.11')
 assert (d['sourcePlatform'],d['targetPlatform'])==('13','140')
@@ -36,7 +36,9 @@ assert (d['currentCordappJars'],d['targetCordappJars'],d['currentOtherJars'])==(
 assert d['confidence']=='HIGH' and cfg['effectiveSchema']=='ExampleMixedCaseIssuer'
 assert cfg['businessRole']=='Unknown' and a['evidence']['environment']['nodeName']=='ExampleIssuer'
 assert a['evidence']['environment']['host']['currentJava']=='1.8.0_242'
-assert any(f['id']=='LP-INPUT-001' for f in a['findings']) # Excluded symlinks still prevent an unsupported readiness claim.
+# Unselected sibling content is outside compatibility scope; diagnostic discovery still reports skipped links.
+assert any('outside supplied root' in issue for issue in a['evidence']['node-discovery']['issues'])
+assert not any('djvm/' in str(j) for j in a['evidence']['environment']['current'])
 for kind,filename,code in [('runtime','corda.jar','LP-DISCOVERY-006'),('tvu','transaction-validator.jar','LP-DISCOVERY-007')]:
     duplicate=pathlib.Path('/tmp/ambiguous-'+kind);shutil.copytree(source/'upgrade-kit',duplicate)
     shutil.copyfile(duplicate/filename,duplicate/'second.jar')

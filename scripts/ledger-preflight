@@ -12,7 +12,7 @@ if [ "${LP_HOST_JAVA_VERSION+x}" != x ]; then
   export LP_HOST_JAVA_VERSION
 fi
 if [ -x "$HERE/runtime/bin/java" ]; then
-  exec "$HERE/runtime/bin/java" -Dfile.encoding=UTF-8 -Xmx512m -jar "$HERE/ledger-preflight-0.1.0.jar" "$@"
+  exec "$HERE/runtime/bin/java" -Dfile.encoding=UTF-8 -Xmx256m -jar "$HERE/ledger-preflight-0.1.0.jar" "$@"
 fi
 if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
   PREFLIGHT_JAVA="$JAVA_HOME/bin/java"
@@ -30,4 +30,4 @@ if [ "$PREFLIGHT_MAJOR" -lt 17 ]; then
   printf '%s\n' 'The JAR-only package needs Java17. Use the linux-x86_64 package with its bundled runtime to assess this server without changing system Java.' >&2
   exit 3
 fi
-exec "$PREFLIGHT_JAVA" -Dfile.encoding=UTF-8 -Xmx512m -jar "$HERE/ledger-preflight-0.1.0.jar" "$@"
+exec "$PREFLIGHT_JAVA" -Dfile.encoding=UTF-8 -Xmx256m -jar "$HERE/ledger-preflight-0.1.0.jar" "$@"

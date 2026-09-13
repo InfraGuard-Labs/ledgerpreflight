@@ -15,7 +15,7 @@ public final class ProductView {
                 case "API_COMPATIBILITY","INTERNAL_API","LEGACY_JARS","CORDAPP","SIGNING"->"CorDapp compatibility";
                 case "TVU"->"TVU validation";
                 case "DATABASE_SCHEMA"->"Schema configuration";
-                case "SECURITY"->"Assessment coverage";
+                case "SECURITY"->"Compatibility analysis incomplete";
                 case "JAVA"->"Target Java";
                 case "CONFIGURATION"->"Environment configuration";
                 default->"Upgrade preparation";
@@ -51,16 +51,16 @@ public final class ProductView {
                     matters=ambiguous?"Node and TVU may select different schemas.":"TVU may require an explicit Hibernate default schema for this setup.";
                     action="Confirm/configure the intended TVU schema and rerun validation.";
                 }
-                case "Assessment coverage" -> {
-                    happened="Some supplied content could not be safely analyzed.";
+                case "Compatibility analysis incomplete" -> {
+                    happened="Some supplied content exceeded safe limits or could not be analyzed.";
                     matters="Compatibility remains unproven for that content; discovered identities are retained.";
-                    action="Review the affected inputs in technical evidence, correct them and run again.";
+                    action="Review the artifact and limit in technical evidence. Complete compatibility analysis before upgrading.";
                 }
                 default -> {happened=first.title()+".";matters=first.impact();action=first.recommendedNextAction();}
             }
             result.add(new Issue(group.getKey(),happened,matters,action,warning,fs.stream().map(Finding::id).distinct().toList()));
         }
-        result.sort(Comparator.comparing(Issue::warning).thenComparingInt(i->switch(i.title()){case "CorDapp compatibility"->0;case "TVU validation"->1;case "Schema configuration"->2;case "Assessment coverage"->3;default->4;}));
+        result.sort(Comparator.comparing(Issue::warning).thenComparingInt(i->switch(i.title()){case "CorDapp compatibility"->0;case "TVU validation"->1;case "Schema configuration"->2;case "Compatibility analysis incomplete"->3;default->4;}));
         return List.copyOf(result);
     }
     /** Exact owner/member/descriptor correlation, scoped strictly to supplied detailed records. */
@@ -108,7 +108,7 @@ public final class ProductView {
         }
         if(issues.size()>selected.size())out.append("\n").append(issues.size()-selected.size()).append(" additional issue groups are available in technical evidence.\n");
         out.append("\nNEXT STEP\n");
-        out.append(issues.stream().anyMatch(i->i.title().equals("CorDapp compatibility")&&!i.warning())?"Resolve the CorDapp compatibility issue first.\nThen rerun LedgerPreflight and TVU.\n":"Resolve the outstanding reviews, then rerun LedgerPreflight and TVU.\n");
+        out.append(issues.stream().anyMatch(i->i.title().equals("Compatibility analysis incomplete"))?"Complete compatibility analysis before upgrading.\n":issues.stream().anyMatch(i->i.title().equals("CorDapp compatibility")&&!i.warning())?"Resolve the CorDapp compatibility issue first.\nThen rerun LedgerPreflight and TVU.\n":"Resolve the outstanding reviews, then rerun LedgerPreflight and TVU.\n");
         return out.toString();
     }
     private ProductView(){}

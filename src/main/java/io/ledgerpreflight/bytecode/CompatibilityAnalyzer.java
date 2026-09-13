@@ -10,7 +10,7 @@ public final class CompatibilityAnalyzer {
     private record Located(JarInventory jar,ClassInfo info) {}
     private record Resolution(Member member,ClassInfo declaring,boolean incomplete) {}
     public List<CompatibilityIssue> analyze(List<JarInventory> consumers,List<JarInventory> runtime,List<JarInventory> legacy,boolean runtimePrecedenceProven){
-        List<CompatibilityIssue> findings=new ArrayList<>();Map<String,List<Located>> runtimeIndex=index(runtime),legacyIndex=index(legacy);
+        List<CompatibilityIssue> findings=new EvidenceList();Map<String,List<Located>> runtimeIndex=index(runtime),legacyIndex=index(legacy);
         Map<String,List<Located>> consumerIndex=index(consumers);
         Map<String,List<Located>> all=index(runtime); merge(all,consumerIndex);merge(all,legacyIndex);
         for(var entry:consumerIndex.entrySet())if(entry.getValue().size()>1||runtimeIndex.containsKey(entry.getKey()))findings.add(issue("LP-API-004","WARNING","Consumer class has multiple supplied definitions; actual class loading must be established",Map.of("class",entry.getKey(),"consumerArtifacts",entry.getValue().stream().map(l->l.jar.path()).sorted().toList().toString()),"Remove duplicate classes or establish actual class-loader selection with supplied runtime evidence."));
@@ -50,16 +50,23 @@ public final class CompatibilityAnalyzer {
                 findings.add(issue("LP-LEGACY-001",runtimePrecedenceProven&&augmentation?"BLOCKED":"WARNING",runtimePrecedenceProven&&augmentation?"Legacy remediation is shadowed: Java loads a whole class and cannot add members from the later duplicate":"Potential duplicate-class shadowing: Java does not merge members from multiple definitions",evidence,"Use a vendor-supported runtime fix; establish actual verifier classpath order and class-load origin before relying on a legacy shim."));
             }
         }
-        return findings.stream().distinct().sorted(Comparator.comparing(CompatibilityIssue::id).thenComparing(CompatibilityIssue::message).thenComparing(i->i.evidence().toString())).toList();
+        return completed(findings).stream().distinct().sorted(Comparator.comparing(CompatibilityIssue::id).thenComparing(CompatibilityIssue::message).thenComparing(i->i.evidence().toString())).toList();
     }
     public List<CompatibilityIssue> compare(List<JarInventory> source,List<JarInventory> target){
-        List<CompatibilityIssue> result=new ArrayList<>();Map<String,List<Located>> targetIndex=index(target);
+        List<CompatibilityIssue> result=new EvidenceList();Map<String,List<Located>> targetIndex=index(target);
         for(JarInventory jar:source)for(ClassInfo cls:jar.classes().values()){
             List<Located> found=targetIndex.get(cls.name());
             if(found==null){result.add(issue("LP-DELTA-001","INFO","Class absent from target inventory",Map.of("sourceJar",jar.path(),"class",cls.name()),"Check whether consuming bytecode references this class."));continue;}
             for(Member member:cls.members())if(found.get(0).info.members().stream().noneMatch(m->same(m,member)))result.add(issue("LP-DELTA-002","INFO","Declared member absent from target class (may have moved to an ancestor)",Map.of("sourceJar",jar.path(),"class",cls.name(),"member",member.name(),"descriptor",member.descriptor(),"kind",member.kind()),"Assess consuming bytecode for effective inherited-member compatibility."));
         }
-        return result.stream().sorted(Comparator.comparing(i->i.evidence().toString())).toList();
+        return completed(result).stream().sorted(Comparator.comparing(i->i.evidence().toString())).toList();
+    }
+    private static final class EvidenceList extends ArrayList<CompatibilityIssue> {
+        boolean limited;long evidenceBytes;
+        @Override public boolean add(CompatibilityIssue issue){long size=issue.evidence().entrySet().stream().mapToLong(e->2L*(e.getKey().length()+e.getValue().length())).sum();if(size()>=512||evidenceBytes+size>1024*1024){limited=true;return false;}evidenceBytes+=size;return super.add(issue);}
+    }
+    private static List<CompatibilityIssue> completed(List<CompatibilityIssue> list){
+        if(list instanceof EvidenceList bounded&&bounded.limited){var result=new ArrayList<>(list);result.add(issue("LP-ANALYSIS-LIMIT","UNKNOWN","Compatibility finding count/size limit reached; remaining findings were not retained",Map.of("retainedFindings",Integer.toString(list.size()),"maximumFindingBytes","1048576"),"Review supplied artifacts and complete bounded compatibility analysis before upgrading."));return result;}return list;
     }
     private static boolean same(Member left,Member right){return left.kind().equals(right.kind())&&left.name().equals(right.name())&&left.descriptor().equals(right.descriptor())&&left.isStatic()==right.isStatic();}
     private static Resolution resolve(ClassInfo info,Reference ref,Map<String,List<Located>> classes,Set<String> visited,int depth){

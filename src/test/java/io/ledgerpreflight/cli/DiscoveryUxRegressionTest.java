@@ -14,7 +14,7 @@ class DiscoveryUxRegressionTest {
  @Test void discoverySummaryAndDrilldownUseObservedMetadata()throws Exception {
   var f=RealDiscoveryRegressionTest.fixture(root);StringWriter output=new StringWriter();var terminal=new SessionTerminal(new StringReader("2\n"),new PrintWriter(output),false,100);
   assertNull(DiscoverySession.prepare(f.options(false),terminal));String text=output.toString();
-  for(String expected:List.of("ExampleIssuer","4.11.6","4.12.11","ExampleMixedCaseIssuer","2 current → 2 target","Platform 13","Platform 140","TVU          Found","1. Continue","2. Exit"))assertTrue(text.contains(expected),expected+"\n"+text);
+  for(String expected:List.of("ExampleIssuer","4.11.6","4.12.11","ExampleMixedCaseIssuer","2 current · 2 target","Platform 13","Platform 140","TVU          Found","1. Continue","2. Exit"))assertTrue(text.contains(expected),expected+"\n"+text);
   for(String hidden:List.of("djvm/link","confidence","Role","Other JARs","Bytecode","Review discovered"))assertFalse(text.contains(hidden),hidden);
  }
  @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
