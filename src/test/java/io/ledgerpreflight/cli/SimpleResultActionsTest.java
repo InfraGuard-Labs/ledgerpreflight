@@ -35,7 +35,7 @@ class SimpleResultActionsTest {
     @Test void threeEvidenceViewsAreHumanReadableAndPreserveCorrelationScope()throws Exception{
         var f=ProductAcceptanceFixture.create(root,true,true);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,true));
         String compatibility=ResultEvidence.compatibility(a),schema=ResultEvidence.schema(a),tvu=ResultEvidence.tvu(a);
-        for(String term:List.of("Affected CorDapp","example-old-contract.jar","Problem","InternalUtils.sum(Iterable)","Impact","Corda 4.12.11","Recommended action"))assertTrue(compatibility.contains(term),term);
+        for(String term:List.of("Affected CorDapp","example-old-contract.jar","Referenced API","InternalUtils.sum(Iterable)","Impact","Corda 4.12.11","Recommended action"))assertTrue(compatibility.contains(term),term);
         for(String term:List.of("PostgreSQL","ExampleMixedCaseIssuer","shared_reference","Why this matters","Recommended action"))assertTrue(schema.contains(term),term);
         for(String term:List.of("650","449","201","201 supplied failures match","Recommended action"))assertTrue(tvu.contains(term),term);
         for(String text:List.of(compatibility,schema,tvu))for(String forbidden:List.of("LP-","technicalEvidence","currentInventory","retained","Ljava/","sha256","\"category\"","at org.example"))assertFalse(text.contains(forbidden),forbidden);

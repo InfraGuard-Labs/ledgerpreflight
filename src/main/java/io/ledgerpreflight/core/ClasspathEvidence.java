@@ -31,6 +31,6 @@ public final class ClasspathEvidence {
         proven&=pairs>0;
         return new Result(proven,proven?(allLoaded?"CONFIRMED":"HIGH"):"POTENTIAL",entries,List.of(proven?"Supplied command orders every overlapping runtime artifact before the corresponding legacy artifact; command provenance is user supplied":"Exact ordering/selection of all overlapping runtime and legacy artifacts was not established"),Collections.unmodifiableMap(sources));
     }
-    private static boolean matches(String entry,String path){String normalized=path.replace('\\','/');return entry.equals(normalized)||entry.endsWith("/"+normalized);}
+    private static boolean matches(String entry,String path){String normalized=path.replace('\\','/').split("!/",2)[0];return entry.equals(normalized)||entry.endsWith("/"+normalized);}
     private static int index(List<String> entries,String path){int found=-1;for(int i=0;i<entries.size();i++)if(matches(entries.get(i),path)){if(found>=0)return -1;found=i;}return found;}
 }

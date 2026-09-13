@@ -1,6 +1,7 @@
 #!/bin/sh
 # Run in a clean Ubuntu base container. No apt, Java, or dependency installation.
 set -eu
+# shellcheck source=/dev/null
 . /etc/os-release
 test "$(uname -m)" = x86_64
 if command -v java >/dev/null 2>&1; then
@@ -18,6 +19,9 @@ set +e
 result=$?
 set -e
 test "$result" = 2
-! command -v java >/dev/null 2>&1
+if command -v java >/dev/null 2>&1; then
+  printf 'Assessment unexpectedly changed the installed Java environment\n' >&2
+  exit 1
+fi
 printf 'Ubuntu %s x86_64: bundled launcher runs without system Java; replay exit2; system Java remains absent.\n' "$VERSION_ID" > "/output/ubuntu-$VERSION_ID.validation.txt"
 cat "/output/ubuntu-$VERSION_ID.validation.txt"

@@ -41,7 +41,7 @@ Manual extraction uses `./ledger-preflight`. Once a release is published, `sh in
 
 ## Understand the result
 
-The interactive flow is **Environment → Result → Technical evidence**. Arrow keys select an action; `q` returns or exits. A numbered fallback works in plain terminals. CI and redirected output never prompt.
+The interactive flow is **Environment → Result → relevant evidence/export/support actions**. Arrow keys select an action; `q` returns or exits. A numbered fallback works in plain terminals. CI and redirected output never prompt.
 
 - **NOT READY TO UPGRADE:** grouped issues explain what happened, why it matters, and what to do.
 - **READY FOR TVU:** static checks passed; complete successful TVU evidence is still required.

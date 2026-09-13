@@ -12,7 +12,8 @@ public final class ProductView {
         Map<String,List<Finding>> groups=new LinkedHashMap<>();
         for(Finding f:a.findings())if(attention(f)) {
             String group=switch(f.category()){
-                case "API_COMPATIBILITY","INTERNAL_API","LEGACY_JARS","CORDAPP","SIGNING"->"CorDapp compatibility";
+                case "API_COMPATIBILITY"->f.severity().equals("UNKNOWN")&&value(f,"resolution").equals("unknown")?"Compatibility analysis incomplete":"CorDapp compatibility";
+                case "INTERNAL_API","LEGACY_JARS","CORDAPP","SIGNING"->"CorDapp compatibility";
                 case "TVU"->"TVU validation";
                 case "DATABASE_SCHEMA"->"Schema configuration";
                 case "SECURITY"->"Compatibility analysis incomplete";
@@ -29,13 +30,13 @@ public final class ProductView {
             Finding first=fs.get(0);
             switch(group.getKey()) {
                 case "CorDapp compatibility" -> {
-                    boolean absent=fs.stream().anyMatch(f->f.id().equals("LP-API-001")&&f.severity().equals("BLOCKED"));
+                    boolean absent=fs.stream().anyMatch(ProductView::blockedApi);
                     boolean shadow=fs.stream().anyMatch(f->f.id().equals("LP-LEGACY-001")&&f.severity().equals("BLOCKED"));
-                    String scope=fs.stream().filter(f->f.id().equals("LP-API-001")&&f.severity().equals("BLOCKED")).allMatch(f->f.affectedArtifact().startsWith("current/historical/"))?"A historical CorDapp":"A supplied CorDapp";
-                    happened=absent?scope+" requires an API the target runtime cannot provide.":first.title()+".";
+                    String scope=fs.stream().filter(ProductView::blockedApi).allMatch(f->value(f,"sourceScope").equals("active-current-cordapp")||f.affectedArtifact().startsWith("current/historical/"))?"A historical CorDapp":"A supplied CorDapp";
+                    happened=absent?scope+" uses an API that is not available in the target Corda runtime.":first.title()+".";
                     if(shadow)happened+=" The verifier selects an earlier class, so the compatibility JAR cannot supply the fix.";
-                    matters="Historical transactions may fail re-verification on the target version.";
-                    action=absent?"Use a compatible target runtime or supported fix, then validate again.":first.recommendedNextAction();
+                    matters="Historical transactions using this CorDapp may fail re-verification after the upgrade.";
+                    action=absent?"Use a compatible target runtime or supported compatibility fix, then validate again.":first.recommendedNextAction();
                 }
                 case "TVU validation" -> {
                     if(a.evidence().get("tvu-summary") instanceof TvuEvidence t && t.failed()!=null&&t.failed()>0) {
@@ -52,8 +53,8 @@ public final class ProductView {
                     action="Confirm/configure the intended TVU schema and rerun validation.";
                 }
                 case "Compatibility analysis incomplete" -> {
-                    happened="Some supplied content exceeded safe limits or could not be analyzed.";
-                    matters="Compatibility remains unproven for that content.";
+                    happened="A required compatibility question could not be resolved safely.";
+                    matters="Compatibility remains unproven for the affected source CorDapp.";
                     action="Export the full technical report for the affected inputs. Complete compatibility analysis before upgrading.";
                 }
                 default -> {happened=first.title()+".";matters=first.impact();action=first.recommendedNextAction();}
@@ -63,6 +64,7 @@ public final class ProductView {
         result.sort(Comparator.comparing(Issue::warning).thenComparingInt(i->switch(i.title()){case "CorDapp compatibility"->0;case "TVU validation"->1;case "Schema configuration"->2;case "Compatibility analysis incomplete"->3;default->4;}));
         return List.copyOf(result);
     }
+    private static boolean blockedApi(Finding f){return f.category().equals("API_COMPATIBILITY")&&f.severity().equals("BLOCKED");}
     /** Exact owner/member/descriptor correlation, scoped strictly to supplied detailed records. */
     public static String correlation(Assessment a,TvuEvidence tvu) {
         long matching=0;
@@ -76,6 +78,8 @@ public final class ProductView {
         return matching+" supplied failure details match the compatibility problem; other reported failures are unclassified.";
     }
     private static boolean matches(Finding f,String root) {
+        String resolution=value(f,"resolution");
+        if(!resolution.isEmpty()&&!Set.of("missing-method","descriptor-mismatch").contains(resolution))return false;
         String owner=value(f,"owner"),member=value(f,"member"),descriptor=value(f,"descriptor");
         if(owner.isEmpty()||member.isEmpty()||descriptor.isEmpty()||!root.contains("NoSuchMethodError"))return false;
         String dotted=owner.replace('/','.');

@@ -2,7 +2,9 @@
 
 Standalone Linux Corda upgrade assurance. No tag, GitHub Release or public image publication is part of this candidate. Fresh manual Run A against the isolated real environment remains the next gate, followed by the remaining real TVU validation states.
 
-The product flow is Environment → Result → Technical evidence. Physical artifact identity is established before deep analysis. Runtime manifests, TVU entries, modern CorDapp headers and targeted legacy class headers survive incomplete compatibility scanning. Per-artifact deep budgets prevent a large capsule from starving later files; nested libraries do not inflate physical artifact counts.
+The product flow is Environment → Result → relevant evidence, export and support actions. Physical artifact identity is established before deep analysis. Runtime manifests, TVU entries, modern CorDapp headers and targeted legacy class headers survive incomplete compatibility scanning. Per-artifact deep budgets prevent a large capsule from starving later files; nested libraries do not inflate physical artifact counts.
+
+Required compatibility questions come from active current CorDapp bytecode. Independent bounded lookup proves exact current and target classes, methods and fields inside runtime capsules, even when unrelated broad indexing is partial. Findings distinguish a missing member, missing class, changed descriptor and unresolved proof. Grouped source provenance identifies the historical calling CorDapp; rebuilt target artifacts and assessment labels are not attributed as callers. Human evidence shows current/target outcomes, while exact descriptors and separate coverage limits remain in exported reports.
 
 The normal result groups compatibility and TVU problems and explains what happened, why it matters, and what to do. Static success enables READY FOR TVU only. READY TO UPGRADE requires complete successful TVU evidence and no outstanding required findings. JSON retains distinct BLOCKED, UNKNOWN and WARNING states and documented exit codes.
 

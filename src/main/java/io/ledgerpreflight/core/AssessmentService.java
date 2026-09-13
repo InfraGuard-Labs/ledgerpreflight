@@ -10,8 +10,10 @@ import java.util.*;
 
 public final class AssessmentService {
     private final BytecodeScanner.Limits analysisLimits;
+    private final TargetedRuntimeLookup.Limits targetedLimits;
     public AssessmentService(){this(BytecodeScanner.Limits.defaults());}
-    public AssessmentService(BytecodeScanner.Limits limits){analysisLimits=Objects.requireNonNull(limits);}
+    public AssessmentService(BytecodeScanner.Limits limits){this(limits,TargetedRuntimeLookup.Limits.defaults());}
+    public AssessmentService(BytecodeScanner.Limits limits,TargetedRuntimeLookup.Limits targeted){analysisLimits=Objects.requireNonNull(limits);targetedLimits=Objects.requireNonNull(targeted);}
     public record Options(Path node,Path kit,Path targetCorda,Path tvuJar,Path targetCordapps,Path legacyJars,Path nodeConf,List<Path> tvuResults,Path verifierClasspath,Path rulePack,String networkMode,Path hostEnvironment,Path currentRuntime) {
         public Options(Path node,Path kit,Path targetCorda,Path tvuJar,Path targetCordapps,Path legacyJars,Path nodeConf,List<Path> tvuResults,Path verifierClasspath,Path rulePack,String networkMode,Path hostEnvironment){this(node,kit,targetCorda,tvuJar,targetCordapps,legacyJars,nodeConf,tvuResults,verifierClasspath,rulePack,networkMode,hostEnvironment,null);}
         public Options(Path node,Path kit,Path targetCorda,Path tvuJar,Path targetCordapps,Path legacyJars,Path nodeConf,List<Path> tvuResults,Path verifierClasspath,Path rulePack){this(node,kit,targetCorda,tvuJar,targetCordapps,legacyJars,nodeConf,tvuResults,verifierClasspath,rulePack,"unknown",null);}
@@ -36,25 +38,29 @@ public final class AssessmentService {
         ScanResult runtimeIdentity=options.targetCorda()==null?targetIdentity:identityScanner.scan(options.targetCorda());
         ScanResult tvuIdentity=options.tvuJar()==null?targetIdentity:identityScanner.scan(options.tvuJar());
         ScanResult appIdentity=options.targetCordapps()==null?targetIdentity:identityScanner.scan(options.targetCordapps());
-        BytecodeScanner scanner=new BytecodeScanner(analysisLimits);
+        BytecodeScanner scanner=new BytecodeScanner(analysisLimits),consumerScanner=new BytecodeScanner(analysisLimits);
         progress.accept("Analyzing supplied compatibility evidence…");
-        ScanResult current=scanner.scanLayout(options.node(),withoutDrivers(currentIdentity)),target=scanner.scanLayout(options.kit(),withoutDrivers(targetIdentity));
+        // Required source bytecode has its own budget and is inspected before broad runtime symbols.
+        ScanResult currentConsumers=consumerScanner.scanLayout(options.node(),selectedInputs(currentIdentity,"CORDAPP","LEGACY_CONTRACT"));
+        ScanResult targetConsumers=consumerScanner.scanLayout(options.targetCordapps()==null?options.kit():options.targetCordapps(),selectedInputs(appIdentity,"CORDAPP"));
+        ScanResult current=mergeScans(currentConsumers,scanner.scanLayout(options.node(),broadInputs(currentIdentity)));
+        ScanResult target=mergeScans(targetConsumers,scanner.scanLayout(options.kit(),broadInputs(targetIdentity)));
         current=referencedDrivers(scanner,options.node(),currentIdentity,current,List.of(current,target));
         target=referencedDrivers(scanner,options.kit(),targetIdentity,target,List.of(current,target));
         List<Finding> findings=new ArrayList<>();
         if(active.selected()==null)findings.add(f("LP-CURRENT-RUNTIME","Active current Corda runtime is not established","UNKNOWN","UPGRADE_PATH",List.of("Selection: "+active.origin(),"Strong root candidates: "+active.candidates().size()),"Current version and compatibility cannot be established","Select the active current runtime in an interactive assessment, or supply an unambiguous node directory."));
-        addScanIssues(findings,current,"current-node");addScanIssues(findings,target,"upgrade-kit");
+        addScanIssues(findings,currentConsumers,"active current CorDapps");addScanIssues(findings,targetConsumers,"target CorDapps");
         verifySnapshot(findings,currentIdentity,current,"current-node");verifySnapshot(findings,targetIdentity,target,"upgrade-kit");
-        addScanIssues(findings,currentIdentity,"current-node identity");addScanIssues(findings,targetIdentity,"upgrade-kit identity");
+        addScanIssues(findings,requiredIdentityIssues(currentIdentity),"current-node identity");addScanIssues(findings,requiredIdentityIssues(targetIdentity),"upgrade-kit identity");
         List<JarInventory> runtimes=analysis(target,targetIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN");
-        if(options.targetCorda()!=null){ScanResult explicit=scanner.scan(options.targetCorda());addScanIssues(findings,explicit,"runtime override");verifySnapshot(findings,runtimeIdentity,explicit,"runtime override");addScanIssues(findings,runtimeIdentity,"runtime identity");runtimes=analysis(explicit,runtimeIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN");}
+        if(options.targetCorda()!=null){ScanResult explicit=scanner.scanLayout(options.targetCorda(),runtimeIdentity);target=mergeScans(target,explicit);verifySnapshot(findings,runtimeIdentity,explicit,"runtime override");runtimes=analysis(explicit,runtimeIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN");}
         List<JarInventory> tvu=Discovery.select(tvuIdentity,"TVU");
-        List<JarInventory> apps=analysis(target,appIdentity,"CORDAPP");
-        if(options.targetCordapps()!=null){ScanResult explicit=scanner.scan(options.targetCordapps());addScanIssues(findings,explicit,"CorDapp override");verifySnapshot(findings,appIdentity,explicit,"CorDapp override");addScanIssues(findings,appIdentity,"CorDapp identity");apps=analysis(explicit,appIdentity,"CORDAPP");}
-        if(options.targetCordapps()!=null&&options.targetCorda()==null){target=referencedDrivers(scanner,options.kit(),targetIdentity,target,List.of(current,new ScanResult(apps,List.of())));addScanIssues(findings,target,"upgrade-kit");verifySnapshot(findings,targetIdentity,target,"upgrade-kit");runtimes=analysis(target,targetIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN");}
+        List<JarInventory> apps=analysis(targetConsumers,appIdentity,"CORDAPP");
+        if(options.targetCordapps()!=null){verifySnapshot(findings,appIdentity,targetConsumers,"CorDapp override");addScanIssues(findings,requiredIdentityIssues(appIdentity),"CorDapp identity");}
         if(options.tvuJar()!=null){addScanIssues(findings,tvuIdentity,"TVU identity");addScanIssues(findings,scanner.scan(options.tvuJar()),"TVU override");}
         List<JarInventory> legacy=options.legacyJars()!=null?override(scanner,options.legacyJars(),findings):analysis(target,targetIdentity,"LEGACY");
-        List<JarInventory> oldApps=analysis(current,currentIdentity,"CORDAPP","LEGACY_CONTRACT");
+        List<JarInventory> oldApps=analysis(currentConsumers,currentIdentity,"CORDAPP","LEGACY_CONTRACT");
+        applicationJava(findings,oldApps,"current/historical");applicationJava(findings,apps,"target");
         String sourceVersion=Discovery.uniqueVersion(Discovery.select(currentIdentity,"RUNTIME")),targetVersion=Discovery.uniqueVersion(Discovery.select(runtimeIdentity,"RUNTIME"));
         if(targetVersion.matches(".*[A-Za-z].*")&&!targetVersion.equals("unknown"))findings.add(f("LP-DISCOVERY-005","Pre-release or qualified runtime version requires validation","UNKNOWN","UPGRADE_PATH",List.of(targetVersion),"Stable release rules may not apply","Supply a supported release runtime and verify version provenance."));
         if(Discovery.topLevel(Discovery.select(targetIdentity,"RUNTIME")).size()>1 && options.targetCorda()==null)findings.add(f("LP-DISCOVERY-006","Multiple target runtime artifacts were discovered","WARNING","UPGRADE_PATH",List.of("Runtime candidates="+Discovery.topLevel(Discovery.select(targetIdentity,"RUNTIME")).size()),"Intended runtime identity is ambiguous","Select the intended runtime with --target-corda and supply its dependency set."));
@@ -65,14 +71,20 @@ public final class AssessmentService {
         if(!oldApps.isEmpty()&&apps.isEmpty())findings.add(f("LP-CORDAPP-004","Target CorDapps are missing","BLOCKED","CORDAPP",List.of(oldApps.size()+" current CorDapps; zero target CorDapps"),"The prepared TVU environment is incomplete","Add rebuilt target CorDapps under upgrade-kit/cordapps."));
         for(JarInventory j:Discovery.select(targetIdentity,"UNKNOWN"))findings.add(f("LP-DISCOVERY-004","Unclassified target JAR","WARNING","DEPENDENCY",List.of(j.path()),"Artifact role is uncertain; classes are included in the provisional target inventory","Verify artifact purpose and the actual verifier classpath."));
         progress.accept("Analyzing CorDapps and checking legacy-jars…");
-        ClasspathEvidence.Result classpath=ClasspathEvidence.read(options.verifierClasspath(),runtimes,legacy);
         progress.accept("Comparing JVM APIs…");
         CompatibilityAnalyzer analyzer=new CompatibilityAnalyzer();
-        List<JarInventory> historical=new ArrayList<>(oldApps);historical.addAll(analysis(current,currentIdentity,"LEGACY"));
-        addCompatibility(findings,analyzer.analyze(historical,runtimes,legacy,classpath.runtimePrecedenceProven()),"current/historical");
-        addCompatibility(findings,analyzer.analyze(apps,runtimes,List.of(),false),"target");
-        if(historical.isEmpty())addCompatibility(findings,analyzer.analyze(List.of(),runtimes,legacy,classpath.runtimePrecedenceProven()),"target");
-        if(findings.stream().noneMatch(f->f.category().equals("SECURITY")))removedClasses(findings,historical,analysis(current,currentIdentity,"RUNTIME","RUNTIME_LIBRARY"),runtimes,legacy,apps);
+        List<JarInventory> historical=oldApps;
+        List<TargetedRuntimeLookup.Artifact> sourceArtifacts=lookupArtifacts(options.node(),currentIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN","LEGACY");
+        List<TargetedRuntimeLookup.Artifact> targetArtifacts=lookupArtifacts(options.kit(),targetIdentity,options.targetCorda()==null?new String[]{"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN"}:new String[]{"RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN"});
+        if(options.targetCorda()!=null)targetArtifacts.addAll(lookupArtifacts(options.targetCorda(),runtimeIdentity,"RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","UNKNOWN"));
+        var currentLookup=new TargetedRuntimeLookup(sourceArtifacts,targetedLimits.forJava(currentJavaFeature(host,active.selected())));
+        var targetLookup=new TargetedRuntimeLookup(targetArtifacts,targetedLimits.forJava(17));
+        var required=new RequiredSymbolAnalyzer().analyze(historical,currentLookup,targetLookup);
+        addCompatibility(findings,required.findings(),"current/historical");
+        // Use required-owner signatures even when an unrelated broad capsule scan was partial.
+        List<JarInventory> targetProof=preferTargeted(runtimes,required.targetClasses());
+        ClasspathEvidence.Result classpath=ClasspathEvidence.read(options.verifierClasspath(),targetProof,legacy);
+        addCompatibility(findings,analyzer.analyze(List.of(),targetProof,legacy,classpath.runtimePrecedenceProven()),"legacy remediation");
         ConfigAnalyzer.ConfigEvidence config;
         Path conf=selectedConf;
         if(conf==null)findings.add(f("LP-CONFIG-002",selected.configs().isEmpty()?"Node configuration was not discovered":"Multiple candidate configurations discovered","UNKNOWN","CONFIGURATION",selected.configs().stream().map(p->p.getFileName().toString()).toList(),"Effective launch configuration is unknown","Select the active configuration with --node-conf or interactive discovery."));
@@ -104,16 +116,48 @@ public final class AssessmentService {
         RuleEngine engine=options.rulePack()==null?new RuleEngine():new RuleEngine().load(options.rulePack());
         for(RuleFinding r:engine.evaluate(facts))findings.add(new Finding(r.id(),r.title(),r.severity(),r.category(),r.status(),r.confidence(),r.source(),r.affectedArtifact(),r.evidence(),r.impact(),r.explanation(),r.nextAction(),r.documentationReference()));
         compareCorDapps(findings,Discovery.select(currentIdentity,"CORDAPP","LEGACY_CONTRACT"),Discovery.select(appIdentity,"CORDAPP"));
-        Map<String,Object> evidence=new TreeMap<>();evidence.put("node-discovery",discovered);evidence.put("environment",Map.of("nodeName",Discovery.displayName(config.safeSettings(),options.node().toAbsolutePath().normalize().getFileName().toString()),"current",Discovery.inventory(currentIdentity),"sourceVersion",sourceVersion,"targetVersion",targetVersion,"offline",true,"host",host,"rulePackVersion",RuleEngine.PACK_VERSION));evidence.put("upgrade-kit",Discovery.inventory(targetIdentity));evidence.put("cordapps-current",Discovery.select(currentIdentity,"CORDAPP","LEGACY_CONTRACT").stream().map(j->Map.of("path",j.path(),"sha256",j.sha256())).toList());evidence.put("cordapps-target",Discovery.select(appIdentity,"CORDAPP").stream().map(j->Map.of("path",j.path(),"sha256",j.sha256())).toList());var runtimeDelta=analyzer.compare(analysis(current,currentIdentity,"RUNTIME","RUNTIME_LIBRARY"),runtimes);evidence.put("runtime-api-delta",runtimeDelta);addCompatibility(findings,runtimeDelta.stream().filter(i->i.id().equals("LP-ANALYSIS-LIMIT")).toList(),"runtime comparison");evidence.put("internal-api-usage",findings.stream().filter(f->f.category().equals("INTERNAL_API")).toList());evidence.put("legacy-jars-analysis",findings.stream().filter(f->f.category().equals("LEGACY_JARS")).toList());evidence.put("classpath-analysis",classpath);evidence.put("schema-analysis",config);evidence.put("tvu-summary",tvuEvidence);evidence.put("sanitized-node.conf",config.sanitizedConfig());
+        Map<String,Object> evidence=new TreeMap<>();evidence.put("node-discovery",discovered);evidence.put("environment",Map.of("nodeName",Discovery.displayName(config.safeSettings(),options.node().toAbsolutePath().normalize().getFileName().toString()),"current",Discovery.inventory(currentIdentity),"sourceVersion",sourceVersion,"targetVersion",targetVersion,"offline",true,"host",host,"rulePackVersion",RuleEngine.PACK_VERSION));evidence.put("upgrade-kit",Discovery.inventory(targetIdentity));evidence.put("cordapps-current",Discovery.select(currentIdentity,"CORDAPP","LEGACY_CONTRACT").stream().map(j->Map.of("path",j.path(),"sha256",j.sha256())).toList());evidence.put("cordapps-target",Discovery.select(appIdentity,"CORDAPP").stream().map(j->Map.of("path",j.path(),"sha256",j.sha256())).toList());var runtimeDelta=analyzer.compare(analysis(current,currentIdentity,"RUNTIME","RUNTIME_LIBRARY"),runtimes);evidence.put("runtime-api-delta",runtimeDelta);evidence.put("internal-api-usage",findings.stream().filter(f->f.category().equals("INTERNAL_API")).toList());evidence.put("legacy-jars-analysis",findings.stream().filter(f->f.category().equals("LEGACY_JARS")).toList());evidence.put("classpath-analysis",classpath);evidence.put("schema-analysis",config);evidence.put("tvu-summary",tvuEvidence);evidence.put("sanitized-node.conf",config.sanitizedConfig());
+        evidence.put("required-symbol-resolution",Map.of("complete",required.complete()&&currentConsumers.issues().isEmpty(),"symbols",required.symbols(),"scope","Active current CorDapp external references","lookupLimits",targetedLimits));
         evidence.put("current-runtime-selection",active.evidence());evidence.put("tvu-evidence-supplied",!options.tvuResults().isEmpty());
         evidence.put("discovery",Discovery.model(currentIdentity,targetIdentity,Discovery.select(currentIdentity,"RUNTIME"),Discovery.select(runtimeIdentity,"RUNTIME"),tvu,Discovery.select(appIdentity,"CORDAPP"),config.safeSettings()));
         evidence.put("other-jars-current",Discovery.otherJars(currentIdentity).stream().map(JarInventory::path).toList());
         evidence.put("other-jars-target",Discovery.otherJars(targetIdentity).stream().map(JarInventory::path).toList());
-        evidence.put("analysis-coverage",Map.of("status",findings.stream().anyMatch(f->f.category().equals("SECURITY"))?"PARTIAL":"COMPLETE_WITHIN_LIMITS","currentIssues",current.issues(),"targetIssues",target.issues(),"limitsPerPhysicalArtifact",analysisLimits,"retainedSymbolMemoryLimitBytes",BytecodeScanner.MAX_RETAINED_BYTES,"currentInventory",Discovery.inventory(current),"targetInventory",Discovery.inventory(target)));
+        evidence.put("analysis-coverage",Map.of("status",!current.issues().isEmpty()||!target.issues().isEmpty()||!currentIdentity.issues().isEmpty()||!targetIdentity.issues().isEmpty()||runtimeDelta.stream().anyMatch(i->i.id().equals("LP-ANALYSIS-LIMIT"))?"PARTIAL":"COMPLETE_WITHIN_LIMITS","currentIssues",current.issues(),"targetIssues",target.issues(),"limitsPerPhysicalArtifact",analysisLimits,"retainedSymbolMemoryLimitBytes",BytecodeScanner.MAX_RETAINED_BYTES,"currentInventory",Discovery.inventory(current),"targetInventory",Discovery.inventory(target)));
         findings=findings.stream().distinct().sorted().toList();
         return new Assessment("1","0.1.0",Assessment.readiness(findings,tvuEvidence.completeSuccess(),!options.tvuResults().isEmpty()),sourceVersion,targetVersion,findings,evidence);
     }
-    private static ScanResult withoutDrivers(ScanResult identity){return new ScanResult(identity.jars().stream().filter(j->!Discovery.role(j).equals("DRIVER")).toList(),List.of());}
+    private static ScanResult selectedInputs(ScanResult identity,String...roles){return new ScanResult(Discovery.select(identity,roles),List.of());}
+    private static ScanResult broadInputs(ScanResult identity){return new ScanResult(identity.jars().stream().filter(j->!Set.of("CORDAPP","LEGACY_CONTRACT","DRIVER","TVU").contains(Discovery.role(j))).toList(),List.of());}
+    private static ScanResult mergeScans(ScanResult a,ScanResult b){
+        return new ScanResult(java.util.stream.Stream.concat(a.jars().stream(),b.jars().stream()).distinct().toList(),java.util.stream.Stream.concat(a.issues().stream(),b.issues().stream()).distinct().toList());
+    }
+    /** Incomplete physical application discovery remains a gate; unrelated runtime inventory does not. */
+    private static ScanResult requiredIdentityIssues(ScanResult identity){
+        Set<String> broad=new HashSet<>();for(JarInventory jar:identity.jars())if(Set.of("RUNTIME","RUNTIME_LIBRARY","VERIFIER","DRIVER","SHELL","SUPPORT").contains(Discovery.role(jar)))broad.add(jar.path());
+        return new ScanResult(List.of(),identity.issues().stream().filter(i->!broad.contains(i.path())).toList());
+    }
+    private static List<TargetedRuntimeLookup.Artifact> lookupArtifacts(Path root,ScanResult identity,String...roles)throws IOException {
+        List<TargetedRuntimeLookup.Artifact> result=new ArrayList<>();Path base=root.toRealPath();boolean single=Files.isRegularFile(base);Path boundary=single?base.getParent():base;
+        for(JarInventory jar:Discovery.topLevel(Discovery.select(identity,roles))){
+            Path path=single?base:base.resolve(jar.path());
+            if(!jar.path().contains("!/")){Path real=path.toRealPath();if(!real.startsWith(boundary))throw new IOException("Runtime lookup path escapes supplied root");result.add(new TargetedRuntimeLookup.Artifact(real,jar.path(),jar.sha256()));}
+        }
+        return result;
+    }
+    private static int currentJavaFeature(HostEnvironment host,JarInventory active){
+        for(String value:List.of(host.currentJava(),active==null?"":Discovery.attr(active,"Min-Java-Version"))){
+            var matcher=java.util.regex.Pattern.compile("^(?:1\\.)?(\\d+)").matcher(value);if(matcher.find()){int feature=Integer.parseInt(matcher.group(1));if(feature>=8)return feature;}
+        }
+        return 8;
+    }
+    private static List<JarInventory> preferTargeted(List<JarInventory> broad,List<JarInventory> targeted){
+        Set<String> exact=new HashSet<>();targeted.forEach(j->exact.addAll(j.classes().keySet()));List<JarInventory> result=new ArrayList<>();
+        for(JarInventory jar:broad){Map<String,ClassInfo> classes=new TreeMap<>(jar.classes());exact.forEach(classes::remove);result.add(new JarInventory(jar.path(),jar.sha256(),jar.manifest(),classes,jar.signatureFiles(),jar.cordappEntrypoints()));}
+        result.addAll(targeted);return result;
+    }
+    private static void applicationJava(List<Finding> findings,List<JarInventory> apps,String scope){
+        for(JarInventory jar:apps)if(jar.classes().values().stream().anyMatch(c->c.majorVersion()>61))findings.add(Finding.of("LP-JAVA-003","CorDapp bytecode requires a JVM newer than Java 17","BLOCKED","JAVA","HIGH","BYTECODE",scope+"/"+jar.path(),List.of("Artifact: "+jar.path(),"Maximum bytecode version: "+jar.classes().values().stream().mapToInt(ClassInfo::majorVersion).max().orElse(0)),"The supplied application cannot run on the target Java 17 runtime","Rebuild the application for the supported target Java version."));
+    }
     /** Drivers enter the bounded signature scan only when supplied code requires their classes. */
     private static ScanResult referencedDrivers(BytecodeScanner scanner,Path root,ScanResult identity,ScanResult scanned,List<ScanResult> consumers){
         List<JarInventory> jars=new ArrayList<>(scanned.jars());List<ScanIssue> issues=new ArrayList<>(scanned.issues());
@@ -158,9 +202,8 @@ public final class AssessmentService {
             if(!name.isEmpty()){try{int av=Integer.parseInt(Discovery.attr(a,"Cordapp-Contract-Version")),bv=Integer.parseInt(Discovery.attr(b,"Cordapp-Contract-Version"));if(bv<=av)findings.add(f("LP-CORDAPP-006","Target contract version did not increase","BLOCKED","CORDAPP",List.of(name+": "+av+" -> "+bv),"Target contracts do not meet the documented upgrade version increment","Increase contract version as required by the official 4.12 upgrade guide."));}catch(NumberFormatException e){findings.add(f("LP-CORDAPP-007","Contract version metadata is incomplete","WARNING","CORDAPP",List.of(name),"Contract version increment cannot be checked","Provide contract version metadata and verify the required increment."));}}
         }
     }
-    private static void removedClasses(List<Finding> findings,List<JarInventory> consumers,List<JarInventory> oldRuntime,List<JarInventory> runtime,List<JarInventory> legacy,List<JarInventory> targetApps){Set<String> before=new HashSet<>(),after=new HashSet<>();oldRuntime.forEach(j->before.addAll(j.classes().keySet()));for(var list:List.of(runtime,legacy,targetApps))list.forEach(j->after.addAll(j.classes().keySet()));for(JarInventory j:consumers)for(ClassInfo c:j.classes().values())for(Reference r:c.references())if(before.contains(r.owner())&&!after.contains(r.owner())){if(findings.size()>=2048){findings.add(f("LP-ANALYSIS-LIMIT","Compatibility analysis incomplete","UNKNOWN","SECURITY",List.of("Finding limit reached"),"Remaining linkage evidence was not retained","Complete bounded analysis before upgrading."));return;}findings.add(f("LP-API-006","Previously supplied runtime class is absent from the target kit","BLOCKED","API_COMPATIBILITY",List.of(j.path(),c.name(),r.owner()),"Required historical linkage is unavailable in the supplied target inventory","Supply the complete supported target runtime/dependencies and rerun TVU."));}}
     private static List<JarInventory> override(BytecodeScanner s,Path path,List<Finding> findings){ScanResult r=s.scan(path);addScanIssues(findings,r,"override");return r.jars();}
     private static void addScanIssues(List<Finding> findings,ScanResult scan,String root){for(ScanIssue i:scan.issues())findings.add(f(i.code(),i.message().toLowerCase(Locale.ROOT).contains("limit")?"Compatibility analysis incomplete":"Input could not be completely scanned","UNKNOWN","SECURITY",List.of(root+"/"+i.path(),i.message()),"Assessment coverage is incomplete","Correct or remove malformed/unsafe supplied inputs and rerun."));}
-    private static void addCompatibility(List<Finding> findings,List<CompatibilityAnalyzer.CompatibilityIssue> issues,String scope){for(var i:issues){String category=i.id().equals("LP-ANALYSIS-LIMIT")?"SECURITY":i.id().startsWith("LP-LEGACY")?"LEGACY_JARS":i.id().startsWith("LP-INTERNAL")?"INTERNAL_API":"API_COMPATIBILITY";findings.add(Finding.of(i.id(),i.message(),i.severity(),category,i.severity().equals("BLOCKED")?"HIGH":"POTENTIAL","RUNTIME_DISCOVERY",scope+"/"+i.evidence().getOrDefault("jar",i.evidence().getOrDefault("legacyJar","runtime")),i.evidence().entrySet().stream().map(e->e.getKey()+": "+e.getValue()).toList(),"Historical or target linkage/verification may fail",i.nextAction()));}}
+    private static void addCompatibility(List<Finding> findings,List<CompatibilityAnalyzer.CompatibilityIssue> issues,String scope){for(var i:issues){String category=i.id().equals("LP-ANALYSIS-LIMIT")?"SECURITY":i.id().startsWith("LP-LEGACY")?"LEGACY_JARS":i.id().startsWith("LP-INTERNAL")?"INTERNAL_API":"API_COMPATIBILITY";findings.add(Finding.of(i.id(),i.message(),i.severity(),category,i.severity().equals("BLOCKED")?"HIGH":"POTENTIAL","RUNTIME_DISCOVERY",scope+"/"+i.evidence().getOrDefault("sourceArtifact",i.evidence().getOrDefault("jar",i.evidence().getOrDefault("legacyJar","runtime"))),i.evidence().entrySet().stream().map(e->e.getKey()+": "+e.getValue()).toList(),"Historical or target linkage/verification may fail",i.nextAction()));}}
     private static Finding f(String id,String title,String severity,String category,List<String> evidence,String impact,String next){return Finding.of(id,title,severity,category,severity.equals("BLOCKED")?"HIGH":"POTENTIAL",id.startsWith("LP-DB")?"HEURISTIC":"RUNTIME_DISCOVERY","assessment",evidence,impact,next);}
 }

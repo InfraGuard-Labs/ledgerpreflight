@@ -14,7 +14,7 @@ Result actions depend on the actual findings:
 | READY FOR TVU | TVU instructions |
 | All results | Export full technical report; Create R3 support package; Run again; Exit |
 
-The three evidence views are short explanations of affected code, effective schemas and supplied TVU totals/root causes. They do not show raw JSON, internal finding IDs, budgets, hashes or stack-trace dumps. There is no general technical-evidence dashboard or interactive raw-report browser. Repeated internal diagnostics map to user-facing issue groups; the result does not display a raw warning total.
+The three evidence views are short explanations of affected code, effective schemas and supplied TVU totals/root causes. Compatibility evidence names only proven source CorDapps and shows the referenced API alongside independent current/target class and member outcomes. Repeated callers share one API root cause. An unrelated broad runtime indexing limit remains in exports; incomplete required lookup is shown as unresolved compatibility. They do not show raw JSON, internal finding IDs, budgets, hashes or stack-trace dumps. There is no general technical-evidence dashboard or interactive raw-report browser. Repeated internal diagnostics map to user-facing issue groups; the result does not display a raw warning total.
 
 Confirmed blockers, unresolved coverage and required reviews all prevent an upgrade recommendation. JSON preserves BLOCKED, UNKNOWN and WARNING separately, with their existing exit codes. The normal screen explains grouped issues using What happened, Why it matters and What to do. TVU failures are correlated to exact member signatures only when the supplied records support that match; missing details remain unclassified.
 

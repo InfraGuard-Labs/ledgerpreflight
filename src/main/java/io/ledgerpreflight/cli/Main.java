@@ -124,7 +124,7 @@ public final class Main implements Callable<Integer> {
         @Option(names="--output",defaultValue="support.zip") Path output;
         public Integer call()throws IOException {
             Reports.checkNoSymlink(assessment);Map<String,String> files=new TreeMap<>();
-            List<String> names=List.of("assessment.json","summary.txt","report.html","environment.json","upgrade-kit.json","cordapps-current.json","cordapps-target.json","runtime-api-delta.json","internal-api-usage.json","legacy-jars-analysis.json","classpath-analysis.json","schema-analysis.json","tvu-summary.json","findings.json","reproduction.txt","sanitized-node.conf");
+            List<String> names=List.of("required-symbol-resolution.json","current-runtime-selection.json","analysis-coverage.json","discovery.json","tvu-evidence-supplied.json","assessment.json","summary.txt","report.html","environment.json","upgrade-kit.json","cordapps-current.json","cordapps-target.json","runtime-api-delta.json","internal-api-usage.json","legacy-jars-analysis.json","classpath-analysis.json","schema-analysis.json","tvu-summary.json","findings.json","reproduction.txt","sanitized-node.conf");
             if(!Files.isDirectory(assessment,LinkOption.NOFOLLOW_LINKS))throw new IOException("Assessment must be a generated report directory");
             for(String name:names){Path p=assessment.resolve(name);if(Files.exists(p,LinkOption.NOFOLLOW_LINKS))files.put(name,new String(SafeInputs.read(p,SafeInputs.MAX_TEXT_BYTES),StandardCharsets.UTF_8));}
             if(!files.containsKey("assessment.json"))throw new IOException("assessment.json is required");new SupportBundle().create(output,bundleFiles(files));return 0;

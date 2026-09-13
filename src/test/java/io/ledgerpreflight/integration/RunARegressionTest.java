@@ -85,8 +85,8 @@ public class RunARegressionTest {
         for(int i=0;i<600;i++){String name="org/example/retired/Api"+i;additions.put(name+".class",SyntheticFixtureFactory.emptyClass(name));}
         update(f.node().resolve("corda.jar"),additions,false);
         var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,false));
-        assertFalse(a.status().startsWith("READY"));assertEquals("PARTIAL",((Map<?,?>)a.evidence().get("analysis-coverage")).get("status"));
-        assertTrue(a.findings().stream().anyMatch(x->x.id().equals("LP-ANALYSIS-LIMIT")));
+        assertEquals("READY FOR TVU",a.status());assertEquals("PARTIAL",((Map<?,?>)a.evidence().get("analysis-coverage")).get("status"));
+        assertFalse(a.findings().stream().anyMatch(x->x.id().equals("LP-ANALYSIS-LIMIT")));
     }
     @Test void excessiveSignatureMetadataDoesNotErasePhysicalIdentity()throws Exception {
         var f=ProductAcceptanceFixture.create(root,false,false);Map<String,byte[]> additions=new TreeMap<>();
@@ -95,7 +95,7 @@ public class RunARegressionTest {
         var identity=new ArtifactDiscovery().scanLayout(f.node());var runtime=Discovery.select(identity,"RUNTIME").get(0);
         assertEquals("4.11.6",Discovery.version(runtime));assertTrue(runtime.signatureFiles().size()<400);
         assertTrue(identity.issues().stream().anyMatch(i->i.message().contains("Signature inventory retention limit")));
-        var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,false));assertFalse(a.status().startsWith("READY"));assertEquals("PARTIAL",((Map<?,?>)a.evidence().get("analysis-coverage")).get("status"));
+        var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,false));assertEquals("READY FOR TVU",a.status());assertEquals("PARTIAL",((Map<?,?>)a.evidence().get("analysis-coverage")).get("status"));
     }
     public static void generate(Path root)throws Exception {
         for(boolean large:List.of(false,true)){String name=large?"large":"normal";var f=fixture(root.resolve(name),large);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,false));identity(a);assertFalse(a.status().startsWith("READY"));Reports.write(root.resolve(name+"-asserted"),Reports.files(a));}

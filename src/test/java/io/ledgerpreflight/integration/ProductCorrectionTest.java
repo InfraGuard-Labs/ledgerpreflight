@@ -23,7 +23,7 @@ class ProductCorrectionTest {
         var a=new AssessmentService(limits).assess(ProductAcceptanceFixture.options(f,false));
         ProductAcceptanceFixture.assertIdentity(a,true);
         assertEquals("PARTIAL",((Map<?,?>)a.evidence().get("analysis-coverage")).get("status"));
-        assertEquals("UNKNOWN",a.status());assertTrue(a.findings().stream().anyMatch(x->x.id().equals("LP-INPUT-001")));
+        assertEquals("WARNING",a.status());assertFalse(a.findings().stream().anyMatch(x->x.id().equals("LP-INPUT-001")));
         assertFalse(a.findings().stream().anyMatch(x->x.id().equals("LP-DISCOVERY-002")||x.id().equals("LP-CORDAPP-004")));
     }
     @Test void perArtifactDeepBudgetDoesNotStarveLaterLegacyApps()throws Exception {
@@ -94,7 +94,7 @@ class ProductCorrectionTest {
         var f=ProductAcceptanceFixture.create(root,false,false);
         addEntry(f.kit().resolve("renamed-runtime.bin"),"large-data",new byte[20000]);
         var a=new AssessmentService(new BytecodeScanner.Limits(1000000,8192,100000,100,2,100,100)).assess(ProductAcceptanceFixture.options(f,false));
-        ProductAcceptanceFixture.assertIdentity(a,false);assertEquals("UNKNOWN",a.status());
+        ProductAcceptanceFixture.assertIdentity(a,false);assertEquals("READY FOR TVU",a.status());
         assertFalse(a.findings().stream().anyMatch(x->x.id().equals("LP-API-006")&&x.severity().equals("BLOCKED")));
     }
     @ParameterizedTest @CsvSource({"org/example/runtime/ValueOps,compute,()I","org/example/runtime/Converters,translate,()Ljava/lang/String;","org/example/runtime/Sequence,next,()J"})

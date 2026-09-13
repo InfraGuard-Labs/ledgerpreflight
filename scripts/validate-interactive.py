@@ -108,7 +108,11 @@ for term in ('NOT READY TO UPGRADE','WHAT HAPPENED','WHY IT MATTERS','WHAT TO DO
     assert term in display(t),term
 t.shot('02-blocked-result.png')
 for action,title,shot in [('View compatibility evidence','COMPATIBILITY EVIDENCE','05-compatibility-evidence.png'),('View schema evidence','SCHEMA EVIDENCE','06-schema-evidence.png'),('View TVU evidence','TVU EVIDENCE','07-tvu-evidence.png')]:
-    t.action(action);t.menu();no_internal(t);assert title in display(t);t.shot(shot);t.action('Back');t.menu()
+    t.action(action);t.menu();no_internal(t);assert title in display(t);
+    if title=='COMPATIBILITY EVIDENCE':
+        for proof in ('Current runtime','Class found','Method found','Target runtime','Method missing','example-old-contract.jar'):assert proof in display(t),proof
+        assert 'example-new-contract.jar' not in display(t)
+    t.shot(shot);t.action('Back');t.menu()
 t.action('Export full technical report');t.menu()
 assert 'Technical report exported' in display(t);no_internal(t);t.shot('08-technical-report-exported.png')
 t.action('Back');t.menu();t.action('Create R3 support package');t.menu()
@@ -193,6 +197,21 @@ t=Terminal('active-runtime-selection','active-runtime',args=['--verifier-classpa
 t.menu();assert 'Select active current Corda runtime' in display(t);t.choose(3);t.menu()
 assert 'Corda        4.11.6' in display(t);t.action('Continue');t.menu();t.action('Run again');t.menu()
 assert 'Corda 4.11.6' in display(t);no_internal(t);t.action('Exit');t.finish(2)
+# Demand-driven proof from actual packaged output: nested API, unrelated broad scan limit.
+destination=pathlib.Path('/work/required-symbols');shutil.copytree(ROOT/'synthetic/required-symbols/blocked',destination)
+(destination/'current-node').rename(destination/'ExampleIssuer')
+t=Terminal('required-symbols','required-symbols',rows=56);t.menu();no_internal(t)
+for expected in ('4.11.6','Platform 13','4.12.11','Platform 140','ExampleSchema','2 current','2 target','TVU          Found'):assert expected in display(t),expected
+t.shot('15-required-symbol-environment.png');t.action('Continue');t.menu();no_internal(t)
+assert 'CorDapp compatibility' in display(t) and 'Compatibility analysis incomplete' not in display(t)
+assert '201' not in display(t) and 'View TVU evidence' not in display(t)
+t.shot('16-required-symbol-result.png');t.action('View compatibility evidence');t.menu();no_internal(t)
+for expected in ('example-old-contract.jar','Amounts.total','3 source classes','Current runtime','4.11.6','Class found','Method found','Target runtime','4.12.11','Method missing'):assert expected in display(t),expected
+assert 'example-new-contract.jar' not in display(t)
+t.shot('17-required-symbol-proof.png');t.action('Back');t.menu();t.action('Export full technical report');t.menu();t.action('Back');t.menu();t.action('Create R3 support package');t.menu();assert 'READY TO SHARE' in display(t);t.action('Back');t.menu();t.action('Exit');t.finish(2)
+t=Terminal('required-symbols-tvu','required-symbols',args=['--tvu-results',str(destination/'tvu.log'),'--tvu-results',str(destination/'errors.zip')],rows=56)
+t.menu();t.action('Continue');t.menu();no_internal(t);assert '201 supplied failures match' in display(t)
+t.shot('18-required-symbol-tvu.png');t.action('Exit');t.finish(2)
 shutil.copytree('/work/reports',ROOT/'interactive-artifacts')
 (SHOTS/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (ROOT/'interactive-validation.json').write_text(json.dumps(results,indent=2)+'\n');print(json.dumps(results,indent=2))

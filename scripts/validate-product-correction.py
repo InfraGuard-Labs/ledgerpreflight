@@ -40,11 +40,12 @@ kit=pathlib.Path('/tmp/partial-target');shutil.copytree(fixture/'clean/upgrade-k
 with zipfile.ZipFile(kit/'renamed-runtime.bin','a',compression=zipfile.ZIP_DEFLATED) as z:
     with z.open('large-synthetic-data','w') as stream:
         for _ in range(33):stream.write(bytes(1024*1024))
-a,_=assess('partial-target-default-limits',kit=kit,expected=4);identity(a)
+a,_=assess('partial-target-default-limits',kit=kit,expected=1);identity(a)
 assert a['evidence']['analysis-coverage']['status']=='PARTIAL'
 assert not any(f['severity']=='BLOCKED' for f in a['findings'])
-a,_=assess('complete-tvu-cannot-override-partial-static',kit=kit,expected=4,extra=['--tvu-results',fixture/'clean/tvu.log'])
-assert a['status']=='UNKNOWN' and a['evidence']['tvu-summary']['completeSuccess']
+a,_=assess('complete-tvu-with-resolved-required-symbols',kit=kit,expected=0,extra=['--tvu-results',fixture/'clean/tvu.log'])
+assert a['status']=='READY TO UPGRADE' and a['evidence']['tvu-summary']['completeSuccess']
+assert a['evidence']['required-symbol-resolution']['complete']
 # Matching primary with additional ordered paths; contradictory defaults remain unresolved.
 for name,conf,expected in [
  ('matching-multiple','database.schema=Primary\nhibernate.default_schema=Primary\ndataSource.url="jdbc:postgresql://db.example/db?currentSchema=Primary,shared,reporting"',1),
