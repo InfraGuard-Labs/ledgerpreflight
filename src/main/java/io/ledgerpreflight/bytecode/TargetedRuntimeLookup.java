@@ -64,9 +64,16 @@ public final class TargetedRuntimeLookup {
     private final Set<String> unresolvedDeclaringComponents=new HashSet<>();
     private long dependencyTextBytes;
     private boolean unresolvedDependencies;
-    private long bytesRead,signatureBytes,started;
+    private long bytesRead,signatureBytes,hierarchyHintBytes,started;
     private int entries;
     private String invalidated;
+    private record HierarchyQuery(Reference reference,int depth) {}
+    private record HierarchyKey(String owner,String kind,String member,String descriptor,int opcode) {}
+    private static final class HierarchyHints {final Map<String,ClassInfo> signatures=new HashMap<>();long bytes;}
+    private final Set<HierarchyKey> preparedHierarchies=new HashSet<>();
+    private Map<String,Set<HierarchyQuery>> hierarchyQueries;
+    private Map<String,String> hierarchySelections;
+    private int hierarchyQueryCount;
 
     public TargetedRuntimeLookup(List<Artifact> artifacts){this(artifacts,Limits.defaults());}
     public TargetedRuntimeLookup(List<Artifact> artifacts,int javaFeature){this(artifacts,Limits.defaults().forJava(javaFeature));}
@@ -118,6 +125,40 @@ public final class TargetedRuntimeLookup {
         try{verifySnapshots();}catch(IOException e){invalidated=e.getMessage();return incomplete(invalidated);}
         if(!cache.containsKey(owner))prefetch(List.of(owner));
         return cache.getOrDefault(owner,incomplete("Required owner cache limit reached"));
+    }
+
+    /** Discover needed ancestors locally, then verify every new owner against the whole context. */
+    public void prefetchHierarchy(Collection<Reference> references){
+        if(hierarchyQueries!=null||invalidated!=null)return;
+        hierarchyQueries=new TreeMap<>();hierarchyQueryCount=0;
+        try{
+            for(Reference reference:references)if(!reference.kind().equals("CLASS")&&!preparedHierarchies.contains(hierarchyKey(reference.owner(),reference)))addHierarchyQuery(reference.owner(),new HierarchyQuery(reference,0));
+            Set<Map.Entry<String,HierarchyQuery>> inspected=new HashSet<>();
+            for(int round=0;round<=128;round++){
+                List<String> owners=hierarchyQueries.keySet().stream().filter(owner->!cache.containsKey(owner)).sorted().toList();
+                if(!owners.isEmpty())prefetch(owners);
+                Map<String,Pending> selected=new TreeMap<>();Map<String,String> origins=new HashMap<>();Set<Map.Entry<String,HierarchyQuery>> work=new HashSet<>();
+                for(var entry:hierarchyQueries.entrySet()){
+                    Result result=cache.get(entry.getKey());if(result==null||result.state()!=State.FOUND)continue;
+                    for(HierarchyQuery query:entry.getValue())if(!inspected.contains(Map.entry(entry.getKey(),query))){
+                        work.add(Map.entry(entry.getKey(),query));Reference ref=query.reference();
+                        if(!result.info().members().stream().anyMatch(m->m.kind().equals(ref.kind())&&m.name().equals(ref.name())&&m.descriptor().equals(ref.descriptor()))){selected.put(entry.getKey(),new Pending());origins.put(entry.getKey(),result.origins().get(0));}
+                    }
+                }
+                if(work.isEmpty())break;inspected.addAll(work);
+                if(!selected.isEmpty()){
+                    hierarchySelections=origins;
+                    List<Artifact> selectedArtifacts=artifacts.stream().filter(artifact->origins.values().stream().anyMatch(origin->origin.startsWith(artifact.label()+"!/"))).toList();
+                    scan(selectedArtifacts,selected,true);hierarchySelections=null;
+                }
+            }
+        }finally{for(var entry:hierarchyQueries.entrySet())for(HierarchyQuery query:entry.getValue())if(preparedHierarchies.size()<32768)preparedHierarchies.add(hierarchyKey(entry.getKey(),query.reference()));hierarchyQueries=null;hierarchySelections=null;}
+    }
+    private static HierarchyKey hierarchyKey(String owner,Reference ref){return new HierarchyKey(owner,ref.kind(),ref.name(),ref.descriptor(),ref.opcode());}
+    private boolean addHierarchyQuery(String owner,HierarchyQuery query){
+        if(query.depth()>128||hierarchyQueryCount>=32768||!validOwner(owner)||owner.equals("java/lang/Object"))return false;
+        if(!hierarchyQueries.containsKey(owner)&&hierarchyQueries.size()>=limits.maxOwners())return false;
+        if(hierarchyQueries.computeIfAbsent(owner,ignored->new LinkedHashSet<>()).add(query)){hierarchyQueryCount++;return true;}return false;
     }
 
     /** Batch required owners before resolving ancestors, so a capsule is streamed once per batch. */
@@ -271,18 +312,23 @@ public final class TargetedRuntimeLookup {
                 }
             }
             names.clear();
-            for(var item:candidates.entrySet()){
+            HierarchyHints localHierarchy=new HierarchyHints();
+            try{for(var item:candidates.entrySet()){
                 Pending value=pending.get(item.getKey());ZipEntry entry=item.getValue().entry();
                 try{
+                    String origin=label+"!/"+entry.getName();
+                    if(hierarchySelections!=null){
+                        if(origin.equals(hierarchySelections.get(item.getKey())))inspectLocalHierarchy(zip,label,cache.get(item.getKey()).info(),localHierarchy);
+                        continue;
+                    }
                     checkExpandedEntry(entry,limits.maxClassBytes());byte[] bytes;
                     try(InputStream in=zip.getInputStream(entry)){bytes=read(in,entry,limits.maxClassBytes());}
-                    ClassInfo info=parse(bytes,item.getKey());
-                    String origin=label+"!/"+entry.getName();reserve(128,origin);
+                    ClassInfo info=parse(bytes,item.getKey());reserve(128,origin);
                     value.found(info,origin,label);
                 }catch(BudgetExceeded e){throw e;}
                 catch(IOException|RuntimeException e){value.failure="Required class could not be inspected: "+Objects.toString(e.getMessage(),"Malformed class");}
                 catch(StackOverflowError e){value.failure="Required class nesting exceeded parser stack capacity";}
-            }
+            }}finally{hierarchyHintBytes-=localHierarchy.bytes;localHierarchy.signatures.clear();}
             // A first hit is insufficient: later components may define the same class.
             for(var enumeration=zip.entries();enumeration.hasMoreElements();){
                 ZipEntry entry=enumeration.nextElement();String name=entry.getName();
@@ -298,6 +344,43 @@ public final class TargetedRuntimeLookup {
                 }finally{Files.deleteIfExists(temporary);}
             }
         }
+    }
+
+    /** These signatures are hints, never class-selection proofs; the next pass checks all candidates. */
+    private void inspectLocalHierarchy(ZipFile zip,String component,ClassInfo first,HierarchyHints hints)throws IOException {
+        record Work(String owner,HierarchyQuery query) {}
+        Map<String,ClassInfo> signatures=hints.signatures;
+        signatures.put(first.name(),first);Deque<Work> pending=new ArrayDeque<>();Set<Work> seen=new HashSet<>();
+        for(HierarchyQuery query:List.copyOf(hierarchyQueries.getOrDefault(first.name(),Set.of())))pending.add(new Work(first.name(),query));
+        while(!pending.isEmpty()){
+            Work work=pending.removeFirst();if(seen.size()>=32768||!seen.add(work))continue;
+            if(!work.owner().equals(first.name())&&!localHintCanWin(work.owner(),component))continue;
+            ClassInfo info=signatures.get(work.owner());
+            if(info==null){
+                ZipEntry entry=zip.getEntry(work.owner()+".class");if(entry==null)continue;
+                long retainedBefore=signatureBytes;
+                try{checkExpandedEntry(entry,limits.maxClassBytes());byte[] bytes;try(InputStream in=zip.getInputStream(entry)){bytes=read(in,entry,limits.maxClassBytes());}info=parse(bytes,work.owner());long retained=signatureBytes-retainedBefore;hints.bytes+=retained;hierarchyHintBytes+=retained;signatures.put(work.owner(),info);}
+                catch(BudgetExceeded e){throw e;}
+                catch(IOException|RuntimeException e){continue;}
+                catch(StackOverflowError e){continue;}
+                finally{signatureBytes=retainedBefore;}
+            }
+            Reference ref=work.query().reference();
+            if(info.members().stream().anyMatch(m->m.kind().equals(ref.kind())&&m.name().equals(ref.name())&&m.descriptor().equals(ref.descriptor())))continue;
+            if(ref.name().equals("<init>")||ref.name().equals("<clinit>")||ref.kind().equals("METHOD")&&ref.isStatic()&&(info.access()&Opcodes.ACC_INTERFACE)!=0)continue;
+            List<String> parents=new ArrayList<>();if(info.superName()!=null)parents.add(info.superName());if(ref.kind().equals("FIELD")||!ref.isStatic())parents.addAll(info.interfaces());
+            for(String parent:parents){HierarchyQuery next=new HierarchyQuery(ref,work.query().depth()+1);if(addHierarchyQuery(parent,next))pending.addLast(new Work(parent,next));}
+        }
+    }
+    /** A potentially earlier provider must be selected before expanding a local parent's chain. */
+    private boolean localHintCanWin(String owner,String component){
+        Result selected=cache.get(owner);
+        if(selected!=null)return selected.state()==State.FOUND&&selected.origins().stream().anyMatch(origin->origin.startsWith(component+"!/")&&!origin.substring(component.length()+2).contains("!/"));
+        if(selectedClassSources.containsKey(owner)){
+            String source=selectedClassSources.get(owner);
+            if(source.isBlank()||!(component.equals(source)||component.startsWith(source+"!/")))return false;
+        }
+        return provenClasspathOrder.isEmpty()||rank(component)==0;
     }
 
     /** Inspect only bounded manifest main headers; never follow a declared URL or external path. */
@@ -368,7 +451,7 @@ public final class TargetedRuntimeLookup {
     }
     private void reserve(int base,String...strings){
         long amount=base;for(String value:strings)if(value!=null){if(value.length()>2048)throw new SignatureExceeded("Required symbol text size limit reached");amount+=48L+2L*value.length();}
-        if(signatureBytes+amount>limits.maxSignatureBytes())throw new SignatureExceeded("Required compact symbol cache size limit reached");signatureBytes+=amount;
+        if(signatureBytes+hierarchyHintBytes+amount>limits.maxSignatureBytes())throw new SignatureExceeded("Required compact symbol cache size limit reached");signatureBytes+=amount;
     }
     private void checkExpandedEntry(ZipEntry entry,long maximum)throws IOException {
         if(entry.getSize()<0||entry.getSize()>maximum)throw new IOException("Required entry byte limit reached");

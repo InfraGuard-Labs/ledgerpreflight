@@ -16,9 +16,10 @@ public final class RequiredSymbolAnalyzer {
         public String display(){return owner.replace('/','.')+"."+member+descriptor;}
         Reference reference(){return new Reference("",kind,owner,member,descriptor,opcode,ownerInterface);}
     }
-    public record Proof(String classStatus,String memberStatus,List<String> artifacts,String declaringClass,List<String> availableDescriptors,String detail,String winningArtifact,List<String> shadowedArtifacts,String precedenceEvidence) {
+    public record Proof(String classStatus,String memberStatus,List<String> artifacts,String declaringClass,List<String> availableDescriptors,String detail,String winningArtifact,List<String> shadowedArtifacts,String precedenceEvidence,List<String> declaringArtifacts) {
+        public Proof(String classStatus,String memberStatus,List<String> artifacts,String declaringClass,List<String> availableDescriptors,String detail,String winningArtifact,List<String> shadowedArtifacts,String precedenceEvidence){this(classStatus,memberStatus,artifacts,declaringClass,availableDescriptors,detail,winningArtifact,shadowedArtifacts,precedenceEvidence,List.of());}
         public Proof(String classStatus,String memberStatus,List<String> artifacts,String declaringClass,List<String> availableDescriptors,String detail){this(classStatus,memberStatus,artifacts,declaringClass,availableDescriptors,detail,"",List.of(),"");}
-        public Proof { winningArtifact=winningArtifact==null?"":winningArtifact;shadowedArtifacts=shadowedArtifacts==null?List.of():List.copyOf(shadowedArtifacts);precedenceEvidence=precedenceEvidence==null?"":precedenceEvidence; }
+        public Proof { winningArtifact=winningArtifact==null?"":winningArtifact;shadowedArtifacts=shadowedArtifacts==null?List.of():List.copyOf(shadowedArtifacts);precedenceEvidence=precedenceEvidence==null?"":precedenceEvidence;declaringArtifacts=declaringArtifacts==null?List.of():List.copyOf(declaringArtifacts); }
     }
     public record ContextResult(ExecutionContext context,Proof proof,Resolution resolution,List<Source> sources) {
         public ContextResult(ExecutionContext context,Proof proof,Resolution resolution){this(context,proof,resolution,List.of());}
@@ -31,18 +32,21 @@ public final class RequiredSymbolAnalyzer {
     public record Analysis(List<CompatibilityAnalyzer.CompatibilityIssue> findings,List<SymbolResult> symbols,boolean complete,List<JarInventory> currentClasses,List<JarInventory> targetClasses,List<JarInventory> verifierClasses) {
         public Analysis(List<CompatibilityAnalyzer.CompatibilityIssue> findings,List<SymbolResult> symbols,boolean complete,List<JarInventory> currentClasses,List<JarInventory> targetClasses){this(findings,symbols,complete,currentClasses,targetClasses,List.of());}
     }
-    public interface Lookup { Result lookup(String owner); default void prefetch(Collection<String> owners){} }
+    public interface Lookup { Result lookup(String owner); default void prefetch(Collection<String> owners){} default void prefetchHierarchy(Collection<Reference> references){} }
     private static final int MAX_SYMBOLS=4096,MAX_SOURCES=16384;
     private static final long MAX_SOURCE_BYTES=2L*1024*1024;
-    private record Linked(Result owner,Member member,ClassInfo declaring,Set<String> alternatives,boolean incomplete,String detail) {}
+    private record Linked(Result owner,Member member,ClassInfo declaring,Set<String> alternatives,boolean incomplete,String detail,Result declaration) {
+        Linked(Result owner,Member member,ClassInfo declaring,Set<String> alternatives,boolean incomplete,String detail){this(owner,member,declaring,alternatives,incomplete,detail,null);}
+    }
     private static final class Tracked implements Lookup {
         final Lookup delegate;final Map<String,Result> results=new TreeMap<>();final Set<String> local;int steps;
         Tracked(Lookup delegate,Set<String> local){this.delegate=delegate;this.local=local;}
         public void prefetch(Collection<String> owners){delegate.prefetch(owners);}
+        public void prefetchHierarchy(Collection<Reference> references){delegate.prefetchHierarchy(references);}
         public Result lookup(String owner){if(++steps>65536)return new Result(State.INCOMPLETE,null,List.of(),"Required hierarchy resolution work limit reached");Result result=delegate.lookup(owner);results.put(owner,result);return result;}
         List<JarInventory> inventories(){Map<String,Map<String,ClassInfo>> jars=new TreeMap<>();for(var entry:results.entrySet()){var result=entry.getValue();if(!local.contains(entry.getKey())&&result.state()==State.FOUND&&result.info()!=null)for(String origin:result.origins())jars.computeIfAbsent(origin,k->new TreeMap<>()).put(result.info().name(),result.info());}return jars.entrySet().stream().map(e->new JarInventory(e.getKey(),"",Map.of(),Collections.unmodifiableMap(e.getValue()),List.of())).toList();}
     }
-    private static Lookup adapt(TargetedRuntimeLookup lookup){return new Lookup(){public Result lookup(String owner){return lookup.lookup(owner);}public void prefetch(Collection<String> owners){lookup.prefetch(owners);}};}
+    private static Lookup adapt(TargetedRuntimeLookup lookup){return new Lookup(){public Result lookup(String owner){return lookup.lookup(owner);}public void prefetch(Collection<String> owners){lookup.prefetch(owners);}public void prefetchHierarchy(Collection<Reference> references){lookup.prefetchHierarchy(references);}};}
     public Analysis analyze(List<JarInventory> consumers,TargetedRuntimeLookup current,TargetedRuntimeLookup target){return analyze(consumers,adapt(current),adapt(target));}
     public Analysis analyze(List<JarInventory> consumers,TargetedRuntimeLookup current,TargetedRuntimeLookup target,TargetedRuntimeLookup verifier){return analyze(consumers,adapt(current),adapt(target),verifier==null?null:adapt(verifier));}
     public Analysis analyze(List<JarInventory> consumers,TargetedRuntimeLookup current,TargetedRuntimeLookup target,TargetedRuntimeLookup verifier,Predicate<Source> verifierApplies){return analyze(consumers,adapt(current),adapt(target),verifier==null?null:adapt(verifier),verifierApplies);}
@@ -107,6 +111,7 @@ public final class RequiredSymbolAnalyzer {
     private static void prepareHierarchy(Lookup lookup,Collection<Symbol> symbols){
         Set<HierarchyQuestion> pending=new LinkedHashSet<>(),visited=new HashSet<>();for(Symbol symbol:symbols)pending.add(new HierarchyQuestion(symbol.owner(),symbol));
         for(int depth=0;depth<=128&&!pending.isEmpty();depth++){
+            lookup.prefetchHierarchy(pending.stream().map(q->new Reference("",q.symbol().kind(),q.owner(),q.symbol().member(),q.symbol().descriptor(),q.symbol().opcode(),q.symbol().ownerInterface())).distinct().toList());
             lookup.prefetch(pending.stream().map(HierarchyQuestion::owner).distinct().sorted().toList());Set<HierarchyQuestion> next=new LinkedHashSet<>();
             for(HierarchyQuestion question:pending){
                 if(visited.size()>=32768)return;if(!visited.add(question))continue;Result result=lookup.lookup(question.owner());Symbol symbol=question.symbol();
@@ -119,7 +124,7 @@ public final class RequiredSymbolAnalyzer {
             pending=next;
         }
     }
-    private static Lookup withLocal(Lookup runtime,Map<String,List<Result>> local){return new Lookup(){public Result lookup(String owner){List<Result> found=local.get(owner);return found==null?runtime.lookup(owner):found.size()==1?found.get(0):new Result(State.AMBIGUOUS,null,found.stream().flatMap(r->r.origins().stream()).sorted().toList(),"Active current CorDapps contain multiple definitions");}public void prefetch(Collection<String> owners){runtime.prefetch(owners.stream().filter(o->!local.containsKey(o)).toList());}};}
+    private static Lookup withLocal(Lookup runtime,Map<String,List<Result>> local){return new Lookup(){public Result lookup(String owner){List<Result> found=local.get(owner);return found==null?runtime.lookup(owner):found.size()==1?found.get(0):new Result(State.AMBIGUOUS,null,found.stream().flatMap(r->r.origins().stream()).sorted().toList(),"Active current CorDapps contain multiple definitions");}public void prefetch(Collection<String> owners){runtime.prefetch(owners.stream().filter(o->!local.containsKey(o)).toList());}public void prefetchHierarchy(Collection<Reference> references){runtime.prefetchHierarchy(references.stream().filter(ref->!local.containsKey(ref.owner())).toList());}};}
     private static boolean declaredLocally(Map<String,List<Result>> local,String owner,Reference ref,Set<String> visited){
         if(visited.size()>128||!visited.add(owner))return false;List<Result> definitions=local.get(owner);if(definitions==null||definitions.size()!=1)return false;ClassInfo cls=definitions.get(0).info();
         if(cls.members().stream().anyMatch(m->m.kind().equals(ref.kind())&&m.name().equals(ref.name())&&m.descriptor().equals(ref.descriptor())&&m.isStatic()==ref.isStatic()))return true;
@@ -131,10 +136,65 @@ public final class RequiredSymbolAnalyzer {
         if(owner.state()!=State.FOUND)return new Linked(owner,null,null,Set.of(),owner.state()!=State.ABSENT,owner.detail());
         if(symbol.kind().equals("CLASS"))return new Linked(owner,null,owner.info(),Set.of(),false,"");
         Linked member=resolveMember(lookup,owner.info(),symbol.reference(),new HashSet<>(),0);
-        return new Linked(owner,member.member(),member.declaring(),member.alternatives(),member.incomplete(),member.detail());
+        Result declaration=member.declaring()==null||member.declaring().name().equals("java/lang/Object")?null:lookup.lookup(member.declaring().name());
+        return new Linked(owner,member.member(),member.declaring(),member.alternatives(),member.incomplete(),member.detail(),declaration);
     }
     private static Linked resolveMember(Lookup lookup,ClassInfo info,Reference ref,Set<String> visited,int depth){
+        if(ref.kind().equals("METHOD"))return resolveMethod(lookup,info,ref);
         return resolveMember(lookup,info,ref,visited,depth,new HashMap<>());
+    }
+    /** Class declarations take precedence over every inherited interface method (JVMS 5.4.3.3). */
+    private static Linked resolveMethod(Lookup lookup,ClassInfo owner,Reference ref){
+        Set<String> alternatives=new TreeSet<>(),classes=new HashSet<>();List<String> interfaces=new ArrayList<>();ClassInfo current=owner;boolean incomplete=false;
+        boolean interfaceOwner=(owner.access()&Opcodes.ACC_INTERFACE)!=0;
+        for(int depth=0;current!=null;depth++){
+            if(depth>128||!classes.add(current.name()))return new Linked(null,null,null,alternatives,true,"Class hierarchy is cyclic or exceeds the required depth limit");
+            for(Member member:current.members())if(member.kind().equals("METHOD")&&member.name().equals(ref.name())){
+                if(member.descriptor().equals(ref.descriptor()))return new Linked(null,member,current,alternatives,false,"");alternatives.add(member.descriptor());
+            }
+            if(ref.name().equals("<init>")||ref.name().equals("<clinit>"))return new Linked(null,null,null,alternatives,false,"");
+            interfaces.addAll(current.interfaces());
+            if(interfaceOwner)break;
+            String parent=current.superName();if(parent==null)break;
+            if(parent.equals("java/lang/Object")){
+                if(objectMethod(ref.name(),ref.descriptor()))return objectLink(ref,alternatives);
+                break;
+            }
+            Result result=lookup.lookup(parent);if(result.state()!=State.FOUND){incomplete=true;break;}
+            if((result.info().access()&Opcodes.ACC_INTERFACE)!=0)return new Linked(null,null,null,alternatives,true,"A class superclass is an interface");
+            current=result.info();
+        }
+        if(interfaceOwner&&objectMethod(ref.name(),ref.descriptor()))return objectLink(ref,alternatives);
+        Map<String,Linked> candidates=new TreeMap<>();Map<String,List<String>> interfaceParents=new HashMap<>();Set<String> seen=new HashSet<>();Deque<Map.Entry<String,Integer>> pending=new ArrayDeque<>();
+        for(String name:interfaces)pending.add(Map.entry(name,0));int edges=0;
+        while(!pending.isEmpty()){
+            var item=pending.removeFirst();String name=item.getKey();if(++edges>65536||item.getValue()>128||seen.size()>=4096){incomplete=true;break;}
+            if(!seen.add(name))continue;Result result=lookup.lookup(name);
+            if(result.state()!=State.FOUND||(result.info().access()&Opcodes.ACC_INTERFACE)==0){incomplete=true;continue;}
+            ClassInfo iface=result.info();interfaceParents.put(name,iface.interfaces());for(Member member:iface.members())if(member.kind().equals("METHOD")&&member.name().equals(ref.name())&&(member.access()&(Opcodes.ACC_STATIC|Opcodes.ACC_PRIVATE))==0){
+                if(member.descriptor().equals(ref.descriptor()))candidates.put(name,new Linked(null,member,iface,Set.of(),false,""));else alternatives.add(member.descriptor());
+            }
+            for(String parent:iface.interfaces())pending.addLast(Map.entry(parent,item.getValue()+1));
+        }
+        if(cyclicInterfaces(interfaceParents))return new Linked(null,null,null,alternatives,true,"Interface hierarchy is cyclic");
+        List<Linked> maximal=new ArrayList<>(candidates.values());
+        for(Linked candidate:candidates.values())for(Linked other:candidates.values())if(candidate!=other){Boolean sub=subtype(lookup,other.declaring().name(),candidate.declaring().name(),new HashSet<>());if(Boolean.TRUE.equals(sub))maximal.remove(candidate);else if(sub==null)incomplete=true;}
+        List<Linked> concrete=maximal.stream().filter(m->(m.member().access()&Opcodes.ACC_ABSTRACT)==0).toList();
+        if(concrete.size()>1||!candidates.isEmpty()&&maximal.isEmpty())return new Linked(null,null,null,alternatives,true,"Multiple conflicting or cyclic interface declarations prevent unique linkage");
+        if(maximal.isEmpty())return new Linked(null,null,null,alternatives,incomplete,incomplete?"A required parent or interface could not be resolved":"");
+        Linked chosen=concrete.isEmpty()?maximal.get(0):concrete.get(0);
+        return new Linked(null,chosen.member(),chosen.declaring(),alternatives,incomplete,incomplete?"A required interface hierarchy could not be resolved":"");
+    }
+    private static boolean cyclicInterfaces(Map<String,List<String>> parents){
+        Map<String,Integer> incoming=new HashMap<>();parents.keySet().forEach(name->incoming.put(name,0));
+        for(var names:parents.values())for(String name:names)if(incoming.containsKey(name))incoming.merge(name,1,Integer::sum);
+        Deque<String> roots=new ArrayDeque<>();incoming.forEach((name,count)->{if(count==0)roots.add(name);});int removed=0;
+        while(!roots.isEmpty()){String name=roots.removeFirst();removed++;for(String parent:parents.getOrDefault(name,List.of()))if(incoming.containsKey(parent)&&incoming.merge(parent,-1,Integer::sum)==0)roots.addLast(parent);}
+        return removed!=parents.size();
+    }
+    private static Linked objectLink(Reference ref,Set<String> alternatives){
+        Member member=new Member("METHOD",ref.name(),ref.descriptor(),Opcodes.ACC_PUBLIC);
+        return new Linked(null,member,new ClassInfo("java/lang/Object",null,List.of(),Opcodes.ACC_PUBLIC,52,List.of(member),List.of()),alternatives,false,"");
     }
     private static Linked resolveMember(Lookup lookup,ClassInfo info,Reference ref,Set<String> visited,int depth,Map<String,Linked> memo){
         Linked cached=memo.get(info.name());if(cached!=null)return cached;
@@ -187,6 +247,12 @@ public final class RequiredSymbolAnalyzer {
         if(target.member()==null){if(!currentExact)return Resolution.UNKNOWN;if(!target.alternatives().isEmpty())return Resolution.DESCRIPTOR_MISMATCH;return symbol.kind().equals("FIELD")?Resolution.MISSING_FIELD:Resolution.MISSING_METHOD;}
         if(target.member().isStatic()!=symbol.reference().isStatic())return currentExact?Resolution.INVOCATION_MISMATCH:Resolution.UNKNOWN;
         if(symbol.opcode()==Opcodes.INVOKEINTERFACE&&(target.owner().info().access()&Opcodes.ACC_INTERFACE)==0||symbol.opcode()==Opcodes.INVOKEVIRTUAL&&(target.owner().info().access()&Opcodes.ACC_INTERFACE)!=0)return currentExact?Resolution.INVOCATION_MISMATCH:Resolution.UNKNOWN;
+        if(symbol.opcode()==Opcodes.INVOKESPECIAL&&!symbol.member().equals("<init>"))for(Source source:sources){
+            if(source.sourceClass().equals(symbol.owner()))continue;
+            Result caller=targetLookup.lookup(source.sourceClass());if(caller.state()!=State.FOUND)return Resolution.UNKNOWN;
+            if((target.owner().info().access()&Opcodes.ACC_INTERFACE)!=0){if(!caller.info().interfaces().contains(symbol.owner()))return Resolution.UNKNOWN;}
+            else if(!Boolean.TRUE.equals(subtype(targetLookup,source.sourceClass(),symbol.owner(),new HashSet<>())))return Resolution.UNKNOWN;
+        }
         int access=target.member().access();if((access&(Opcodes.ACC_PUBLIC|Opcodes.ACC_PRIVATE|Opcodes.ACC_PROTECTED))==0&&sources.stream().anyMatch(s->!packageName(s.sourceClass()).equals(packageName(target.declaring().name()))))return Resolution.ACCESS_INCOMPATIBLE;
         if((access&Opcodes.ACC_PRIVATE)!=0&&sources.stream().anyMatch(s->!s.sourceClass().equals(target.declaring().name())))return Resolution.UNKNOWN;
         if((access&Opcodes.ACC_PROTECTED)!=0)for(Source source:sources)if(!packageName(source.sourceClass()).equals(packageName(target.declaring().name()))){Boolean sub=subtype(targetLookup,source.sourceClass(),target.declaring().name(),new HashSet<>());if(Boolean.FALSE.equals(sub))return Resolution.ACCESS_INCOMPATIBLE;if(sub==null||!symbol.reference().isStatic())return Resolution.UNKNOWN;}
@@ -195,7 +261,7 @@ public final class RequiredSymbolAnalyzer {
     private static Proof proof(Linked linked,Symbol symbol){
         String owner=linked.owner().state()==State.FOUND?"found":linked.owner().state()==State.ABSENT?"absent":"unknown";
         String member=symbol.kind().equals("CLASS")?"not-applicable":linked.incomplete()?"unknown":linked.member()!=null?"found":!linked.alternatives().isEmpty()?"descriptor-mismatch":"absent";
-        return new Proof(owner,member,linked.owner().origins(),linked.declaring()==null?"":linked.declaring().name(),List.copyOf(linked.alternatives()),linked.detail(),linked.owner().winningOrigin(),linked.owner().shadowedOrigins(),linked.owner().precedenceEvidence());
+        return new Proof(owner,member,linked.owner().origins(),linked.declaring()==null?"":linked.declaring().name(),List.copyOf(linked.alternatives()),linked.detail(),linked.owner().winningOrigin(),linked.owner().shadowedOrigins(),linked.owner().precedenceEvidence(),linked.declaration()==null?List.of():linked.declaration().origins());
     }
     private static CompatibilityAnalyzer.CompatibilityIssue finding(SymbolResult result){
         String id=result.resolution()==Resolution.MISSING_CLASS?"LP-API-006":result.resolution()==Resolution.UNKNOWN?"LP-API-003":result.resolution()==Resolution.ACCESS_INCOMPATIBLE?"LP-API-005":"LP-API-001";
@@ -229,6 +295,7 @@ public final class RequiredSymbolAnalyzer {
         for(ContextResult context:result.contexts()){
             String prefix=switch(context.context()){case CURRENT_NODE_RUNTIME->"current";case TARGET_NODE_RUNTIME->"target";case TARGET_VERIFIER->"verifier";};
             data.put(prefix+"Resolution",resolutionName(context.resolution()));data.put(prefix+"WinningArtifact",context.proof().winningArtifact());data.put(prefix+"ShadowedArtifacts",String.join("; ",context.proof().shadowedArtifacts()));data.put(prefix+"PrecedenceEvidence",context.proof().precedenceEvidence());
+            data.put(prefix+"DeclaringArtifacts",String.join("; ",context.proof().declaringArtifacts()));
             if(context.context()==ExecutionContext.TARGET_NODE_RUNTIME)data.put("nodeResolution",resolutionName(context.resolution()));
             if(context.context()==ExecutionContext.TARGET_VERIFIER){Proof proof=context.proof();data.put("verifierClass",proof.classStatus());data.put("verifierMember",proof.memberStatus());data.put("verifierJar",String.join("; ",proof.artifacts()));data.put("verifierDeclaringClass",proof.declaringClass());data.put("verifierAvailableDescriptors",proof.availableDescriptors().toString());data.put("verifierResolutionDetail",proof.detail());data.put("verifierReferenceSites",Integer.toString(context.sources().size()));}
         }

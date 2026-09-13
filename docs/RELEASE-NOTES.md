@@ -1,12 +1,14 @@
 # LedgerPreflight 0.1.0 (unreleased)
 
-Standalone Linux Corda upgrade assurance. No tag, GitHub Release or public image publication is part of this candidate. Fresh manual Run A against the isolated real environment remains the next gate, followed by the remaining real TVU validation states.
+Standalone Linux Corda upgrade assurance. No tag, GitHub Release or public image publication is part of this candidate. The next gate is a final real-environment regression without TVU evidence and with the supplied correlated TVU evidence.
 
 The product flow is Environment → Result → relevant evidence, export and support actions. Physical artifact identity is established before deep analysis. Runtime manifests, TVU entries, modern CorDapp headers and targeted legacy class headers survive incomplete compatibility scanning. Per-artifact deep budgets prevent a large capsule from starving later files; nested libraries do not inflate physical artifact counts.
 
 Required compatibility questions come from active current CorDapp bytecode. Independent bounded lookup proves exact current and target classes, methods and fields inside runtime capsules, even when unrelated broad indexing is partial. Findings distinguish a missing member, missing class, changed descriptor and unresolved proof. Grouped source provenance identifies the historical calling CorDapp; rebuilt target artifacts and assessment labels are not attributed as callers. Human evidence shows current/target outcomes, while exact descriptors and separate coverage limits remain in exported reports.
 
 Current node, target node and target external verifier now resolve in separate execution contexts. Supporting driver duplicates do not compete with selected runtime definitions. Proven verifier/legacy order selects one class without merging members; unproven ordering remains local to that context. Target replacement matching no longer obscures a confirmed runtime incompatibility. Human compatibility evidence shows each relevant runtime outcome, and sanitized support packages include execution-context and exact-symbol proof. Environment, schema evidence and result actions retain their existing flow.
+
+Generic inherited-member resolution now handles facade/helper hierarchies without exhausting the archive-work budget through repeated full enumerations. Compatible exact inherited methods remain quiet, while missing or changed ancestor members remain incompatibilities. Interface defaults, constructors, access restrictions and invocation semantics are checked conservatively. Synthetic JVM oracles and packaged regressions cover a compatible inherited helper alongside one confirmed removed method, with and without all 201 correlated TVU failure records. The packaged heap limit remains 256 MiB.
 
 The normal result groups compatibility and TVU problems and explains what happened, why it matters, and what to do. Static success enables READY FOR TVU only. READY TO UPGRADE requires complete successful TVU evidence and no outstanding required findings. JSON retains distinct BLOCKED, UNKNOWN and WARNING states and documented exit codes.
 
