@@ -59,6 +59,16 @@ class Terminal:
             os.write(self.fd,b'\x1b[B'*(n-1));self.until('Up/Down')
         os.write(self.fd,b'\r')
     def shot(self,name):
+        return self.capture(name)
+    def action(self,label):
+        lines=list(self.screen.display);first=next(i for i,line in enumerate(lines) if line.startswith('> '))
+        labels=[]
+        for line in lines[first:]:
+            if 'Up/Down' in line:break
+            labels.append(line[2:].strip())
+        assert label in labels,(self.name,label,labels)
+        self.choose(labels.index(label)+1)
+    def capture(self,name):
         lines=self.screen.display
         for bad in ('REQUIRED_OR_UNRESOLVED','Analyzer:','C:\\Users','SyntheticPasswordOnly42','UNVERIFIED'):
             assert bad not in '\n'.join(lines),bad
@@ -85,8 +95,9 @@ class Terminal:
 
 def display(t):return '\n'.join(t.screen.display)
 def no_internal(t):
-    for text in ('Other JARs','Discovery confidence','REQUIRED_OR_UNRESOLVED','Analyzer:','JVM descriptor','legacy-jars/','sha256','PARTIAL','MEDIUM','HIGH','Understand the blockers'):
+    for text in ('Other JARs','Discovery confidence','REQUIRED_OR_UNRESOLVED','Analyzer:','JVM descriptor','legacy-jars/','sha256','PARTIAL','MEDIUM','HIGH','Understand the blockers','View technical evidence','View full technical report','LP-','currentInventory','targetInventory','retained symbol','corda.jar-old'):
         assert text not in display(t),text
+    assert not re.search(r'\d+ warnings',display(t))
 t=Terminal('environment','environment');t.menu()
 for expected in ('NODE DISCOVERED','ExampleIssuer','4.11.6','Platform 13','4.12.11','Platform 140','1.8.0_242','Schemas      2 detected','Primary      ExampleMixedCaseIssuer','2 current','2 target','TVU          Found','> Continue'):
     assert expected in display(t),expected
@@ -96,31 +107,33 @@ t=Terminal('blocked');t.menu();t.choose(1);t.menu();no_internal(t)
 for term in ('NOT READY TO UPGRADE','WHAT HAPPENED','WHY IT MATTERS','WHAT TO DO','NEXT STEP','201 supplied failures match','449 passed','2 issues need attention','Create R3 support package'):
     assert term in display(t),term
 t.shot('02-blocked-result.png')
-t.choose(1);t.menu();t.shot('05-technical-evidence.png');t.choose(6);t.menu()
-assert 'Assessment generated' in display(t);t.shot('06-technical-assessment-created.png')
-t.choose(1);t.menu();t.choose(8);t.menu();t.choose(2);t.menu()
+for action,title,shot in [('View compatibility evidence','COMPATIBILITY EVIDENCE','05-compatibility-evidence.png'),('View schema evidence','SCHEMA EVIDENCE','06-schema-evidence.png'),('View TVU evidence','TVU EVIDENCE','07-tvu-evidence.png')]:
+    t.action(action);t.menu();no_internal(t);assert title in display(t);t.shot(shot);t.action('Back');t.menu()
+t.action('Export full technical report');t.menu()
+assert 'Technical report exported' in display(t);no_internal(t);t.shot('08-technical-report-exported.png')
+t.action('Back');t.menu();t.action('Create R3 support package');t.menu()
 assert 'READY TO SHARE' in display(t) and 'Final package rescanned' in display(t)
-t.shot('07-r3-support-ready.png');t.choose(1);t.menu();t.choose(4);t.finish(2);t.shot('08-clean-exit.png')
+t.shot('09-r3-support-ready.png');t.action('Back');t.menu();t.action('Exit');t.finish(2);t.shot('10-clean-exit.png')
 
 t=Terminal('ready-for-tvu','clean');t.menu();t.choose(1);t.menu();no_internal(t)
 assert 'READY FOR TVU' in display(t) and 'TVU instructions' in display(t)
-t.shot('03-ready-for-tvu.png');t.choose(1);t.menu();t.shot('09-tvu-instructions.png')
+t.shot('03-ready-for-tvu.png');assert 'View TVU evidence' not in display(t);t.action('TVU instructions');t.menu();t.shot('14-tvu-instructions.png')
 t.choose(1);t.until('TVU log, error ZIP');os.write(t.fd,b'/work/clean/tvu.log\n');t.menu();t.choose(1);t.menu();t.choose(1);t.menu()
-assert 'READY TO UPGRADE' in display(t) and 'View upgrade checklist' in display(t)
-t.choose(1);t.menu();t.shot('10-upgrade-checklist.png');t.choose(1);t.menu();t.choose(3);t.finish(0)
+assert 'READY TO UPGRADE' in display(t) and 'View TVU evidence' in display(t)
+t.action('View TVU evidence');t.menu();assert 'complete successful verification' in display(t);t.action('Back');t.menu();t.action('Exit');t.finish(0)
 
 t=Terminal('ready-to-upgrade','clean',['--tvu-results','/work/clean/tvu.log']);t.menu();t.choose(1);t.menu()
-assert 'READY TO UPGRADE' in display(t);no_internal(t);t.shot('04-ready-to-upgrade.png');t.choose(3);t.finish(0)
+assert 'READY TO UPGRADE' in display(t);no_internal(t);t.shot('04-ready-to-upgrade.png');t.action('Exit');t.finish(0)
 for name,key,code in [('q',b'q',2),('ctrl-c',b'\x03',130)]:
     t=Terminal(name);t.menu();t.choose(1);t.menu();os.write(t.fd,key);t.finish(code)
 t=Terminal('sigterm');t.menu();os.kill(t.pid,15);t.finish(143)
 t=Terminal('unexpected-output-failure','clean',output='/proc/ledgerpreflight-unwritable');t.menu();t.choose(1);t.finish(3)
 assert b'Assessment error' in t.data
-t=Terminal('run-again');t.menu();t.choose(1);t.menu();t.choose(3);t.menu()
-assert 'NOT READY TO UPGRADE' in display(t);t.choose(4);t.finish(2)
+t=Terminal('run-again');t.menu();t.choose(1);t.menu();t.action('Run again');t.menu()
+assert 'NOT READY TO UPGRADE' in display(t);t.action('Exit');t.finish(2)
 
-t=Terminal('plain','clean',['--plain-terminal']);t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');os.write(t.fd,b'3\n');t.finish(1);assert b'\x1b[' not in t.data
-t=Terminal('narrow','clean',['--plain-terminal'],cols=40,rows=52);t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');t.shot('11-narrow-terminal.png');os.write(t.fd,b'3\n');t.finish(1)
+t=Terminal('plain','clean',['--plain-terminal']);t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');os.write(t.fd,b'q\n');t.finish(1);assert b'\x1b[' not in t.data
+t=Terminal('narrow','clean',['--plain-terminal'],cols=40,rows=52);t.until('Choose an action');os.write(t.fd,b'1\n');t.until('Choose an action');t.shot('11-narrow-terminal.png');os.write(t.fd,b'q\n');t.finish(1)
 t=Terminal('ssh-arrows','clean',cols=36,rows=52,env={'SSH_TTY':'/dev/pts/1','LANG':'C.UTF-8'});t.menu()
 os.write(t.fd,b'\x1b[B');t.until('Up/Down');assert '> Exit' in display(t)
 os.write(t.fd,b'\x1b[A');t.until('Up/Down');assert '> Continue' in display(t);os.write(t.fd,b'q');t.finish(0)
@@ -145,7 +158,7 @@ clone=pathlib.Path('/work/isolated-copy');shutil.copytree('/work/clean/ExampleIs
 conf=clone/'node.conf';conf.write_text(conf.read_text().replace('database.example/example','disposable.example/validation'))
 shutil.rmtree(clone/'cordapps');shutil.copytree('/work/clean/upgrade-kit/cordapps',clone/'cordapps')
 t=Terminal('tvu-execution-cancel','clean');t.menu();t.choose(1);t.menu();t.choose(1);t.menu();t.choose(2);t.until('Prepared isolated validation-copy directory');os.write(t.fd,str(clone).encode()+b'\n')
-t.until('Confirmation');os.write(t.fd,b'NO\n');t.menu();assert b'TVU execution cancelled' in t.data;t.choose(1);t.menu();t.choose(3);t.finish(1)
+t.until('Confirmation');os.write(t.fd,b'NO\n');t.menu();assert b'TVU execution cancelled' in t.data;t.choose(1);t.menu();t.action('Exit');t.finish(1)
 assert not list(pathlib.Path('/work/reports/tvu-execution-cancel').glob('tvu-run-*'))
 # The asserted real-structure fixture must also traverse Continue using the shipped launcher.
 for kind,fixture in [('run-a','normal'),('run-a-limited','large')]:
@@ -164,8 +177,22 @@ for kind,fixture in [('run-a','normal'),('run-a-limited','large')]:
     assert 'NOT READY TO UPGRADE' in display(t)
     if kind=='run-a':assert 'CorDapp compatibility' in display(t);t.shot('12-run-a-continue-result.png')
     else:assert 'Compatibility analysis incomplete' in display(t);t.shot('13-graceful-incomplete-result.png')
-    t.choose(4);t.finish(2)
+    t.action('Exit');t.finish(2)
     assert b'OutOfMemoryError' not in t.data
+# A known canonical runtime wins over valid historical siblings without using their deep budget.
+destination=pathlib.Path('/work/active-runtime');shutil.copytree(ROOT/'synthetic/active-runtime',destination)
+(destination/'current-node').rename(destination/'ExampleIssuer')
+t=Terminal('active-runtime','active-runtime',args=['--verifier-classpath',str(destination/'classpath.txt'),'--tvu-results',str(destination/'tvu.log'),'--tvu-results',str(destination/'errors.zip')])
+t.menu()
+for expected in ('Corda        4.11.6','Platform 13','ExampleSchema','2 current','2 target','TVU          Found'):assert expected in display(t),expected
+no_internal(t);manifest[:]=[m for m in manifest if m['file']!='01-environment-discovered.png'];t.shot('01-environment-discovered.png')
+t.action('Continue');t.menu();no_internal(t);assert 'NOT READY TO UPGRADE' in display(t);t.action('Exit');t.finish(2)
+# A noncanonical current-runtime choice survives Continue and Run again.
+(destination/'ExampleIssuer/corda.jar').rename(destination/'ExampleIssuer/selected-runtime.bin')
+t=Terminal('active-runtime-selection','active-runtime',args=['--verifier-classpath',str(destination/'classpath.txt')])
+t.menu();assert 'Select active current Corda runtime' in display(t);t.choose(3);t.menu()
+assert 'Corda        4.11.6' in display(t);t.action('Continue');t.menu();t.action('Run again');t.menu()
+assert 'Corda 4.11.6' in display(t);no_internal(t);t.action('Exit');t.finish(2)
 shutil.copytree('/work/reports',ROOT/'interactive-artifacts')
 (SHOTS/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (ROOT/'interactive-validation.json').write_text(json.dumps(results,indent=2)+'\n');print(json.dumps(results,indent=2))

@@ -59,7 +59,7 @@ public final class Discovery {
     public static List<JarInventory> topLevel(List<JarInventory> jars){return jars.stream().filter(j->jars.stream().noneMatch(parent->j.path().startsWith(parent.path()+"!/"))).toList();}
     public static String uniqueVersion(List<JarInventory> jars){var physical=topLevel(jars);return physical.size()==1?version(physical.get(0)):"unknown";}
     public static List<JarInventory> otherJars(ScanResult scan){return topLevel(scan.jars()).stream().filter(j->!Set.of("RUNTIME","TVU","CORDAPP","LEGACY_CONTRACT").contains(role(j))).toList();}
-    public record Model(String sourceVersion,String targetVersion,String sourcePlatform,String targetPlatform,String sourceMinimumJava,String targetMinimumJava,int currentCordappJars,int targetCordappJars,int currentOtherJars,int targetOtherJars,String confidence,List<String> confidenceReasons){}
+    public record Model(String sourceVersion,String targetVersion,String sourcePlatform,String targetPlatform,String sourceMinimumJava,String targetMinimumJava,int currentCordappJars,int targetCordappJars,int currentOtherJars,int targetOtherJars,String confidence,List<String> confidenceReasons,String sourceVendor){}
     /** Optional business role and safely excluded external links do not erase established identity. */
     public static Model model(ScanResult current,ScanResult target,List<JarInventory> oldRuntime,List<JarInventory> runtime,List<JarInventory> tvu,List<JarInventory> apps,Map<String,Object> config){
         String source=uniqueVersion(oldRuntime),destination=uniqueVersion(runtime);List<String> reasons=new ArrayList<>();
@@ -70,7 +70,7 @@ public final class Discovery {
         if(topLevel(tvu).size()!=1||!uniqueVersion(tvu).equals(destination))reasons.add("One matching target TVU has not been established");
         int oldApps=topLevel(select(current,"CORDAPP","LEGACY_CONTRACT")).size(),newApps=topLevel(apps).size();
         if(oldApps==0||newApps==0)reasons.add("CorDapp evidence is incomplete; a node with no applications requires review");
-        return new Model(source,destination,metadata(oldRuntime,true),metadata(runtime,true),metadata(oldRuntime,false),metadata(runtime,false),oldApps,newApps,otherJars(current).size(),otherJars(target).size(),unknown?"UNKNOWN":reasons.isEmpty()?"HIGH":"MEDIUM",List.copyOf(reasons));
+        return new Model(source,destination,metadata(oldRuntime,true),metadata(runtime,true),metadata(oldRuntime,false),metadata(runtime,false),oldApps,newApps,otherJars(current).size(),otherJars(target).size(),unknown?"UNKNOWN":reasons.isEmpty()?"HIGH":"MEDIUM",List.copyOf(reasons),topLevel(oldRuntime).size()==1?attr(topLevel(oldRuntime).get(0),"Corda-Vendor"):"Unknown");
     }
     private static String metadata(List<JarInventory> jars,boolean platform){var physical=topLevel(jars);if(physical.size()!=1)return "Unknown";String value=platform?platform(physical.get(0)):attr(physical.get(0),"Min-Java-Version");return value.isBlank()?"Unknown":value;}
     public static String displayName(Map<String,Object> settings,String fallback){

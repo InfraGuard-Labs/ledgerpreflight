@@ -52,7 +52,7 @@ The interactive flow is **Environment → Result → Technical evidence**. Arrow
 <img src="docs/images/ledgerpreflight-ready-for-tvu.png" alt="Static checks passed, TVU still required" width="850">
 <img src="docs/images/ledgerpreflight-ready-to-upgrade.png" alt="Static checks and supplied TVU evidence passed" width="850">
 
-Import one complete TVU run with `--tvu-results /path/to/evidence`. Use `--json` for automation, `--verbose` for full findings, or `View technical evidence` for interactive detail. The JSON status distinguishes blockers, warnings, and unknown evidence; [exit codes and guidance](docs/USER-GUIDE.md) explain automation behavior.
+Import one complete TVU run with `--tvu-results /path/to/evidence`. Use `--json` for automation, `--verbose` for full findings, or the relevant compatibility, schema and TVU evidence actions for short explanations. Use `Export full technical report` for raw diagnostics. The JSON status distinguishes blockers, warnings, and unknown evidence; [exit codes and guidance](docs/USER-GUIDE.md) explain automation behavior.
 
 [Security](SECURITY.md) · [License](LICENSE) · [Technical boundaries](docs/UNIVERSAL-DISCOVERY.md)
 

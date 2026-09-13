@@ -18,6 +18,14 @@ final class DiscoverySession {
         if(config==null&&node.configs().size()==1)config=node.configs().get(0);
         else if(config==null&&node.configs().size()>1){int n=terminal.choose("Select the active node configuration",node.configs().stream().map(p->node.root().relativize(p).toString()).toList());if(n<0)return null;config=node.configs().get(n);}
         var scanner=new ArtifactDiscovery();var current=scanner.scanLayout(node.root());var target=scanner.scanLayout(o.kit());
+        Path currentRuntime=o.currentRuntime();
+        String requested=ActiveRuntime.requestedPath(node.root(),current,currentRuntime);
+        var active=ActiveRuntime.select(current,requested);
+        if(active.selected()==null&&active.candidates().size()>1){
+            Path choice=selectArtifact(node.root(),active.candidates(),"Select active current Corda runtime",terminal);if(choice==null)return null;
+            active=ActiveRuntime.select(current,ActiveRuntime.requestedPath(node.root(),current,choice));currentRuntime=choice;
+        }
+        current=active.inputs();
         Path runtime=o.targetCorda(),tvu=o.tvuJar();
         if(runtime==null&&Discovery.topLevel(Discovery.select(target,"RUNTIME")).size()>1){runtime=selectArtifact(o.kit(),Discovery.topLevel(Discovery.select(target,"RUNTIME")),"Select target Corda runtime",terminal);if(runtime==null)return null;}
         if(tvu==null&&Discovery.topLevel(Discovery.select(target,"TVU")).size()>1){tvu=selectArtifact(o.kit(),Discovery.topLevel(Discovery.select(target,"TVU")),"Select target TVU artifact",terminal);if(tvu==null)return null;}
@@ -46,7 +54,7 @@ final class DiscoverySession {
         if(validators.isEmpty())summary+="\nAdd the intended target TVU artifact to the upgrade kit.\n";
         terminal.screen();terminal.text(summary);
         if(terminal.choose("",List.of("Continue","Exit"))!=0){terminal.screen();terminal.text("LedgerPreflight 0.1.0\nSession complete. Assessment was not run.");return null;}
-        return new AssessmentService.Options(node.root(),o.kit(),runtime,tvu,o.targetCordapps(),o.legacyJars(),config,o.tvuResults(),o.verifierClasspath(),o.rulePack(),o.networkMode(),o.hostEnvironment());
+        return new AssessmentService.Options(node.root(),o.kit(),runtime,tvu,o.targetCordapps(),o.legacyJars(),config,o.tvuResults(),o.verifierClasspath(),o.rulePack(),o.networkMode(),o.hostEnvironment(),currentRuntime);
     }
     private static List<String> runtimeDetails(List<JarInventory> jars){return jars.stream().map(j->Discovery.version(j)+" · platform "+Discovery.platform(j)+" · "+Discovery.attr(j,"Corda-Vendor")+" · minimum Java "+human(Discovery.attr(j,"Min-Java-Version"))).toList();}
     private static String human(String value){return value.isBlank()||value.equalsIgnoreCase("unknown")?"Unknown":value.equals("NOT_INSTALLED")?"Not installed":value;}

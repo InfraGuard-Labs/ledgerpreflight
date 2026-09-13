@@ -22,7 +22,7 @@ for version in ('18.04','20.04','22.04','24.04'):
     assert b['evidence']['analysis-coverage']['status']=='PARTIAL'
     assert any('symbol memory' in str(f['technicalEvidence']) for f in b['findings'])
     raw=(base/f'run-a-{version}.ansi').read_bytes()
-    assert b'> Continue' in raw and b'> View technical evidence' in raw
+    assert b'> Continue' in raw and b'> View compatibility evidence' in raw
     assert b'OutOfMemoryError' not in raw and b'Exception in thread' not in raw
     assert raw.rfind(b'\x1b[?25h')>raw.rfind(b'\x1b[?25l')
     assert '-Xmx256m' in (base/f'run-a-{version}.command.txt').read_text()

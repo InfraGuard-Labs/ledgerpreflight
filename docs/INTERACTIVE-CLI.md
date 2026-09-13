@@ -1,19 +1,25 @@
 # Interactive CLI
 
-The normal flow has three layers: Environment, Result, Technical evidence. Discovery happens before deep compatibility analysis. The environment screen shows the chosen node, runtime versions/platforms, current Java evidence, database, primary schema and physical CorDapp counts. Its only actions are Continue and Exit. Ambiguous node/configuration/runtime/TVU choices are resolved explicitly first.
+The normal flow is Environment, Result, then relevant evidence or export actions. Discovery happens before deep compatibility analysis. The environment screen shows the chosen node, active current runtime, target runtime, current Java evidence, database, schema and CorDapp counts. Its only actions are Continue and Exit. Ambiguous node/configuration/current-runtime/target-runtime/TVU choices are resolved explicitly first.
 
-Result actions depend on the current evidence:
+A strongly identified root corda.jar is the active current runtime even when historical runtime copies are present. With no valid canonical runtime, one strong root candidate is selected regardless of name; multiple equally strong candidates require selection. Historical runtimes stay in exported diagnostics and are excluded from normal deep analysis. Active version, platform, minimum Java and vendor feed the same normalized model used by discovery and assessment.
 
-| Result | Actions |
+Result actions depend on the actual findings:
+
+| Condition | Action |
 | --- | --- |
-| NOT READY TO UPGRADE | View technical evidence; Create R3 support package; Run again; Exit |
-| READY FOR TVU | TVU instructions; View technical evidence; Exit |
-| READY TO UPGRADE | View upgrade checklist; View technical evidence; Exit |
+| CorDapp/API compatibility issue | View compatibility evidence |
+| Schema issue or warning | View schema evidence |
+| Supplied TVU results | View TVU evidence |
+| READY FOR TVU | TVU instructions |
+| All results | Export full technical report; Create R3 support package; Run again; Exit |
 
-Confirmed blockers, unresolved coverage, and required warning reviews all prevent an upgrade recommendation. JSON preserves BLOCKED, UNKNOWN and WARNING separately, with their existing exit codes. The normal screen explains grouped issues using What happened, Why it matters, and What to do. Repeated TVU errors are correlated to exact missing member signatures only when the supplied evidence supports that match.
+The three evidence views are short explanations of affected code, effective schemas and supplied TVU totals/root causes. They do not show raw JSON, internal finding IDs, budgets, hashes or stack-trace dumps. There is no general technical-evidence dashboard or interactive raw-report browser. Repeated internal diagnostics map to user-facing issue groups; the result does not display a raw warning total.
 
-Technical evidence contains runtime manifests, inventories, exact API references, classpath order, schemas/search paths, TVU totals, coverage limits and skipped paths. It also generates complete HTML/JSON/text assessments and lists the generated files. Sanitized support packages contain generated textual evidence only, exclude binaries/keys/keystores, undergo a final ZIP secret scan, and receive an external SHA-256 checksum.
+Confirmed blockers, unresolved coverage and required reviews all prevent an upgrade recommendation. JSON preserves BLOCKED, UNKNOWN and WARNING separately, with their existing exit codes. The normal screen explains grouped issues using What happened, Why it matters and What to do. TVU failures are correlated to exact member signatures only when the supplied records support that match; missing details remain unclassified.
 
-TVU instructions describe isolated-copy preparation and allow importing an existing complete run or explicitly approving execution on an isolated node/database copy. The exact command and environment are shown before approval. Static assessment never executes TVU, changes the node, runs SQL, or performs migrations.
+Export full technical report writes complete HTML, JSON and plain text and shows their paths. Raw runtime manifests, active/inactive candidates, inventories, exact API references, classpath order, schema/search-path declarations, TVU totals, coverage limits and skipped paths remain in exported diagnostics. Sanitized support packages contain generated textual evidence only, exclude binaries/keys/keystores, undergo a final ZIP secret scan and receive an external SHA-256 checksum.
 
-Selection uses ASCII >. Interactive menus hide the native cursor and restore it in a finally block and shutdown hook. Arrow keys, j/k, Enter and q are supported. Plain-terminal mode uses full numbered labels; CI, JSON and redirected output contain no interactive cursor controls. Abrupt power loss or SIGKILL cannot execute cleanup; standard exit, q, Ctrl+C, SIGTERM and exceptions are covered by terminal validation.
+TVU instructions preserve isolated-copy preparation, importing an existing complete run and explicitly approved execution on an isolated node/database copy. The command and environment are shown before approval. Static assessment never executes TVU, changes the node, runs SQL or performs migrations.
+
+Selection uses ASCII >. Interactive menus hide the native cursor and restore it in a finally block and shutdown hook. Arrow keys, j/k, Enter and q are supported. Plain-terminal mode uses numbered labels; CI, JSON and redirected output remain deterministic and noninteractive. Abrupt power loss or SIGKILL cannot execute cleanup; standard exit, q, Ctrl+C, SIGTERM and exceptions are covered by terminal validation.

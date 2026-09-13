@@ -10,8 +10,9 @@ import java.util.*;
 /** A live assessment session. Each action operates on the currently selected target. */
 public final class InteractiveSession {
     enum Action {
-        EVIDENCE("View technical evidence"), SUPPORT("Create R3 support package"), AGAIN("Run again"),
-        INSTRUCTIONS("TVU instructions"), CHECKLIST("View upgrade checklist"), EXIT("Exit");
+        COMPATIBILITY("View compatibility evidence"), SCHEMA("View schema evidence"), TVU("View TVU evidence"),
+        EXPORT("Export full technical report"), SUPPORT("Create R3 support package"), AGAIN("Run again"),
+        INSTRUCTIONS("TVU instructions"), EXIT("Exit");
         final String label;Action(String label){this.label=label;}
     }
     private AssessmentService.Options options;
@@ -24,16 +25,20 @@ public final class InteractiveSession {
         this.options=options;this.assessment=assessment;this.output=output.toAbsolutePath().normalize();this.sessionRoot=this.output;this.terminal=terminal;
         rememberReports(this.output);
     }
-    static List<Action> actions(String status) {
-        if(status.equals("READY FOR TVU"))return List.of(Action.INSTRUCTIONS,Action.EVIDENCE,Action.EXIT);
-        if(status.equals("READY TO UPGRADE"))return List.of(Action.CHECKLIST,Action.EVIDENCE,Action.EXIT);
-        return List.of(Action.EVIDENCE,Action.SUPPORT,Action.AGAIN,Action.EXIT);
+    static List<Action> actions(Assessment assessment) {
+        List<Action> actions=new ArrayList<>();
+        if(ResultEvidence.hasCompatibility(assessment))actions.add(Action.COMPATIBILITY);
+        if(ResultEvidence.hasSchema(assessment))actions.add(Action.SCHEMA);
+        if(ResultEvidence.hasTvu(assessment))actions.add(Action.TVU);
+        if(assessment.status().equals("READY FOR TVU"))actions.add(Action.INSTRUCTIONS);
+        actions.addAll(List.of(Action.EXPORT,Action.SUPPORT,Action.AGAIN,Action.EXIT));
+        return List.copyOf(actions);
     }
     public int run()throws IOException {
         Reports.write(output,Reports.files(assessment));
         while(true) {
             terminal.screen();terminal.text(ProductView.result(assessment));
-            List<Action> choices=actions(assessment.status());
+            List<Action> choices=actions(assessment);
             int selected=terminal.choose("",choices.stream().map(a->a.label).toList());
             if(selected<0||choices.get(selected)==Action.EXIT){
                 terminal.screen();terminal.text("LedgerPreflight "+assessment.productVersion()+"\nSession complete · "+ProductView.state(assessment)+"\nAssessment saved: "+output.resolve("report.html"));
@@ -41,31 +46,15 @@ public final class InteractiveSession {
             }
             terminal.screen();
             try {switch(choices.get(selected)){
-                case EVIDENCE -> technical();
+                case COMPATIBILITY -> {terminal.text(ResultEvidence.compatibility(assessment));terminal.choose("",List.of("Back"));}
+                case SCHEMA -> {terminal.text(ResultEvidence.schema(assessment));terminal.choose("",List.of("Back"));}
+                case TVU -> {terminal.text(ResultEvidence.tvu(assessment));terminal.choose("",List.of("Back"));}
+                case EXPORT -> {report();terminal.choose("",List.of("Back"));}
                 case SUPPORT -> {support();terminal.choose("",List.of("Back"));}
                 case AGAIN -> reanalyze(options,fresh("reassessment"));
                 case INSTRUCTIONS -> instructions();
-                case CHECKLIST -> {checklist();terminal.choose("",List.of("Back"));}
                 default -> {}
             }}catch(Exception e){terminal.text("! Action could not complete: "+Objects.toString(e.getMessage(),"unknown error")+"\nYour current assessment remains available.");terminal.choose("",List.of("Back"));}
-        }
-    }
-    private void technical()throws IOException {
-        while(true) {
-            terminal.screen();
-            int choice=terminal.choose("TECHNICAL EVIDENCE",List.of("Compatibility and classpath","Runtime and artifact identity","Schema configuration","TVU results","Analysis coverage","Generate technical assessment","View generated artifacts","Back"));
-            if(choice<0||choice==7)return;
-            terminal.screen();
-            switch(choice){
-                case 0 -> page("COMPATIBILITY AND CLASSPATH\n"+Reports.json(assessment.findings())+"\nRuntime comparison\n"+Reports.json(assessment.evidence().get("runtime-api-delta"))+"\nClasspath order\n"+Reports.json(assessment.evidence().get("classpath-analysis")));
-                case 1 -> page("ARTIFACT IDENTITY\n"+Reports.json(assessment.evidence().get("discovery"))+"\nCurrent physical artifacts\n"+Reports.json(assessment.evidence().get("environment"))+"\nTarget physical artifacts\n"+Reports.json(assessment.evidence().get("upgrade-kit"))+"\nHashes\n"+Reports.json(assessment.hashes()));
-                case 2 -> page("SCHEMA CONFIGURATION\n"+Reports.json(assessment.evidence().get("schema-analysis")));
-                case 3 -> page("TVU RESULTS\n"+Reports.json(assessment.evidence().get("tvu-summary")));
-                case 4 -> page("ANALYSIS COVERAGE\n"+Reports.json(assessment.evidence().get("analysis-coverage"))+"\nDiscovery paths\n"+Reports.json(assessment.evidence().get("node-discovery")));
-                case 5 -> {report();terminal.choose("",List.of("Back"));}
-                case 6 -> {artifacts();terminal.choose("",List.of("Back"));}
-                default -> {}
-            }
         }
     }
     private void instructions()throws Exception {
@@ -75,16 +64,10 @@ public final class InteractiveSession {
         if(choice==0)importTvu();else if(choice==1)runTvu();else return;
         terminal.choose("",List.of("Continue"));
     }
-    private void page(String text)throws IOException {
-        String[] lines=text.split("\n");
-        for(int i=0;i<lines.length;i+=14){terminal.screen();terminal.text(String.join("\n",Arrays.copyOfRange(lines,i,Math.min(i+14,lines.length))));
-            if(i+14<lines.length){if(terminal.choose("DETAILS",List.of("Continue","Back"))!=0)return;}
-            else terminal.choose("End of technical evidence",List.of("Back"));}
-    }
     private void report()throws IOException {
         terminal.text("Generating complete technical assessment…");
-        Map<String,String> files=Reports.files(assessment);files.put("technical-assessment.txt",Reports.terminal(assessment,true));files.put("remediation-plan.txt",AssessmentInsights.plan(assessment));
-        Reports.write(output,files);rememberReports(output);generated.add(output.resolve("technical-assessment.txt"));generated.add(output.resolve("remediation-plan.txt"));terminal.text("Assessment generated\nHTML: "+output.resolve("report.html")+"\nJSON: "+output.resolve("report.json")+"\nSummary: "+output.resolve("summary.txt")+"\nTechnical text: "+output.resolve("technical-assessment.txt"));
+        Map<String,String> files=Reports.files(assessment);files.put("technical-assessment.txt",Reports.terminal(assessment,true));files.put("remediation-plan.txt",AssessmentInsights.plan(assessment));files.put("upgrade-checklist.txt",checklist());
+        Reports.write(output,files);rememberReports(output);generated.add(output.resolve("technical-assessment.txt"));generated.add(output.resolve("remediation-plan.txt"));terminal.text("Technical report exported\nHTML: "+output.resolve("report.html")+"\nJSON: "+output.resolve("report.json")+"\nSummary: "+output.resolve("summary.txt")+"\nTechnical text: "+output.resolve("technical-assessment.txt"));
     }
     private Path fresh(String prefix)throws IOException {
         Reports.checkNoSymlink(sessionRoot);Files.createDirectories(sessionRoot);
@@ -141,13 +124,13 @@ public final class InteractiveSession {
         for(Path p:paths){Main.ensureOutputSeparate(sessionRoot,p);if(!Files.exists(p))throw new IOException("TVU evidence path does not exist");}
         reanalyze(withTvu(paths),fresh("imported-tvu"));
     }
-    private AssessmentService.Options withTvu(List<Path> paths){return new AssessmentService.Options(options.node(),options.kit(),options.targetCorda(),options.tvuJar(),options.targetCordapps(),options.legacyJars(),options.nodeConf(),paths,options.verifierClasspath(),options.rulePack(),options.networkMode(),options.hostEnvironment());}
+    private AssessmentService.Options withTvu(List<Path> paths){return new AssessmentService.Options(options.node(),options.kit(),options.targetCorda(),options.tvuJar(),options.targetCordapps(),options.legacyJars(),options.nodeConf(),paths,options.verifierClasspath(),options.rulePack(),options.networkMode(),options.hostEnvironment(),options.currentRuntime());}
     private void reanalyze(AssessmentService.Options candidate,Path destination)throws IOException {commit(candidate,new AssessmentService().assess(candidate,terminal::text),destination);}
     private void commit(AssessmentService.Options candidate,Assessment next,Path destination)throws IOException {
         Reports.write(destination,Reports.files(next));options=candidate;assessment=next;output=destination;
-        rememberReports(destination);terminal.text("Assessment updated · "+next.status()+"\nReports: "+destination);
+        rememberReports(destination);terminal.text("Assessment updated · "+ProductView.state(next)+"\nReports: "+destination);
     }
-    private void checklist() {
-        terminal.text("UPGRADE CHECKLIST · "+assessment.targetVersion()+"\n\n1. Validate the upgrade in a lower environment first.\n2. Confirm rebuilt target CorDapps, signing continuity and target Java.\n3. Verify complete successful TVU evidence for these exact artifacts\n   and the intended database snapshot; static checks do not replace TVU.\n4. Confirm backups, restore rehearsal and the rollback plan.\n5. Follow the supported network upgrade sequence. During rolling or\n   sequential upgrades, avoid processing transactions across incompatible\n   mixed versions; coordinate participants and notaries as required.\n6. Obtain change approval and follow the supported Corda upgrade guide.\n7. Run validation/test transactions and check node health after upgrade.\n\nLedgerPreflight has not modified or upgraded your node.");
+    private String checklist() {
+        return "UPGRADE CHECKLIST · "+assessment.targetVersion()+"\n\n1. Validate the upgrade in a lower environment first.\n2. Confirm rebuilt target CorDapps, signing continuity and target Java.\n3. Verify complete successful TVU evidence for these exact artifacts\n   and the intended database snapshot; static checks do not replace TVU.\n4. Confirm backups, restore rehearsal and the rollback plan.\n5. Follow the supported network upgrade sequence. During rolling or\n   sequential upgrades, avoid processing transactions across incompatible\n   mixed versions; coordinate participants and notaries as required.\n6. Obtain change approval and follow the supported Corda upgrade guide.\n7. Run validation/test transactions and check node health after upgrade.\n\nLedgerPreflight has not modified or upgraded your node.";
     }
 }

@@ -53,8 +53,8 @@ public final class ProductView {
                 }
                 case "Compatibility analysis incomplete" -> {
                     happened="Some supplied content exceeded safe limits or could not be analyzed.";
-                    matters="Compatibility remains unproven for that content; discovered identities are retained.";
-                    action="Review the artifact and limit in technical evidence. Complete compatibility analysis before upgrading.";
+                    matters="Compatibility remains unproven for that content.";
+                    action="Export the full technical report for the affected inputs. Complete compatibility analysis before upgrading.";
                 }
                 default -> {happened=first.title()+".";matters=first.impact();action=first.recommendedNextAction();}
             }
@@ -96,7 +96,7 @@ public final class ProductView {
         if(a.status().equals("WARNING"))out.append("Required reviews remain before upgrading.\n");
         List<Issue> issues=issues(a);long blocking=issues.stream().filter(i->!i.warning()).count();
         out.append("\n").append(blocking==0?issues.size()+(issues.size()==1?" review needs attention":" reviews need attention"):blocking+(blocking==1?" issue needs attention":" issues need attention"));
-        long warnings=a.findings().stream().filter(f->f.severity().equals("WARNING")).count();if(warnings>0)out.append(" · ").append(warnings).append(" warnings");out.append("\n");
+        out.append("\n");
         int shown=0,ordinal=0;List<Issue> selected=new ArrayList<>();
         for(Issue issue:issues)if(!issue.warning()&&shown++<2)selected.add(issue);
         issues.stream().filter(Issue::warning).findFirst().ifPresent(selected::add);
@@ -106,7 +106,7 @@ public final class ProductView {
             out.append("WHY IT MATTERS  ").append(issue.matters()).append("\n");
             out.append("WHAT TO DO  ").append(issue.action()).append("\n");
         }
-        if(issues.size()>selected.size())out.append("\n").append(issues.size()-selected.size()).append(" additional issue groups are available in technical evidence.\n");
+        if(issues.size()>selected.size())out.append("\nAdditional issues are explained in the exported technical report.\n");
         out.append("\nNEXT STEP\n");
         out.append(issues.stream().anyMatch(i->i.title().equals("Compatibility analysis incomplete"))?"Complete compatibility analysis before upgrading.\n":issues.stream().anyMatch(i->i.title().equals("CorDapp compatibility")&&!i.warning())?"Resolve the CorDapp compatibility issue first.\nThen rerun LedgerPreflight and TVU.\n":"Resolve the outstanding reviews, then rerun LedgerPreflight and TVU.\n");
         return out.toString();
