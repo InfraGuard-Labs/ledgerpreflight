@@ -9,6 +9,7 @@ import java.util.*;
 import java.util.regex.*;
 
 public final class ConfigAnalyzer {
+    private static final List<String> HIBERNATE_SCHEMA_KEYS=List.of("hibernate.default_schema","database.hibernate.default_schema","\"hibernate.default_schema\"");
     public record ConfigEvidence(String schema, String jdbcCurrentSchema, String hibernateDefaultSchema,
             boolean mixedCase, boolean contradictory, boolean postgresql, List<String> issues, String sanitizedConfig,
             Map<String,Object> safeSettings) {
@@ -16,6 +17,74 @@ public final class ConfigAnalyzer {
                 boolean contradictory,boolean postgresql,List<String> issues,String sanitizedConfig) {
             this(schema,jdbcCurrentSchema,hibernateDefaultSchema,mixedCase,contradictory,postgresql,issues,sanitizedConfig,Map.of());
         }
+    }
+    /** Static proof for the selected configuration, never proof of a successful TVU/database run. */
+    public record TvuSchemaReadiness(boolean applicable,boolean proven,String status,String configurationSource,
+            String effectiveSchema,String mappedProperty,String configuredValue,List<String> evidence) { }
+    public static TvuSchemaReadiness tvuSchemaReadiness(ConfigEvidence config,String targetVersion) {
+        String primary=Objects.toString(config.safeSettings().get("primarySchema"),"");
+        boolean known="CONFIGURED".equals(config.safeSettings().get("schemaResolution"));
+        boolean mixed=known&&!primary.isEmpty()&&!primary.equals(primary.toLowerCase(Locale.ROOT));
+        boolean family=Objects.toString(targetVersion,"").matches("4\\.12(?:\\.[0-9]+)*");
+        boolean applicable=config.postgresql()&&mixed&&family;
+        String source=Objects.toString(config.safeSettings().get("configurationSource"),"Not established");
+        // Corda documents database.schema as the property mapped to Hibernate default_schema.
+        // TVU reads the selected node configuration via -f. A HOCON string containing a
+        // complete double-quoted identifier preserves its case in Hibernate-generated SQL.
+        // Undocumented hibernate.* aliases and node-only JVM settings cannot establish this.
+        String quoted=quotedIdentifier(config.schema());
+        boolean proven=applicable&&!config.contradictory()&&quoted!=null&&quoted.equals(primary);
+        List<String> proof=new ArrayList<>();
+        proof.add("Target TVU family: "+(family?"4.12":"Not established as 4.12"));
+        proof.add("Selected configuration: "+source);
+        proof.add("Effective schema: "+Objects.toString(config.safeSettings().get("effectiveSchema"),"Not established"));
+        if(applicable)proof.add(proven?"Explicit quoted database.schema matches the effective schema and maps to Hibernate default_schema":"Required explicit quoted TVU Hibernate schema configuration is not proven in the selected configuration");
+        else proof.add("The known 4.12 mixed-case effective PostgreSQL schema condition is not established");
+        proof.add("Configuration proof applies only when TVU uses this selected configuration; it does not prove physical database state, a different validation copy, or successful TVU execution");
+        return new TvuSchemaReadiness(applicable,proven,proven?"CONFIGURATION_PROVEN":applicable?"REQUIRED_UNPROVEN":"NOT_APPLICABLE",source,primary,"hibernate.default_schema",Objects.toString(config.schema(),""),List.copyOf(proof));
+    }
+    /** A known rule can be applied only in a private guided workspace, after database approval. */
+    public static boolean canPrepareTvuSchema(ConfigEvidence config,String targetVersion) {
+        if(!tvuSchemaReadiness(config,targetVersion).applicable()||config.contradictory())return false;
+        try{selectTvuSchema(config,null);return true;}catch(IOException ignored){return false;}
+    }
+    /** A manual selection is constrained to names already established by configuration evidence. */
+    public static String selectTvuSchema(ConfigEvidence config,String explicitSchema)throws IOException {
+        String primary=Objects.toString(config.safeSettings().get("primarySchema"),"");
+        boolean configured="CONFIGURED".equals(config.safeSettings().get("schemaResolution"));
+        String chosen=explicitSchema==null||explicitSchema.isBlank()?null:explicitSchema;
+        if(chosen==null){
+            if(!configured||primary.isBlank())throw new IOException("Could not determine the effective schema. Select a schema from the discovered configuration.");
+            chosen=primary;
+        }else{
+            if(configured&&!primary.isBlank()&&!chosen.equals(primary))throw new IOException("The selected TVU schema differs from the established primary schema.");
+            Set<String> candidates=new LinkedHashSet<>();if(!primary.isBlank())candidates.add(primary);
+            for(String key:List.of("schemas","schemaDeclarations")){
+                Object value=config.safeSettings().get(key);
+                if(value instanceof Collection<?> values)for(Object item:values)if(item instanceof String name)candidates.add(name);
+            }
+            if(!candidates.contains(chosen))throw new IOException("The selected TVU schema is not established by the supplied configuration.");
+        }
+        if(chosen.isBlank()||chosen.length()>256||chosen.codePoints().anyMatch(Character::isISOControl))
+            throw new IOException("The effective schema cannot be safely represented in TVU configuration.");
+        return chosen;
+    }
+    public static String quotedTvuSchema(String schema)throws IOException {
+        if(schema==null||schema.isBlank()||schema.length()>256||schema.codePoints().anyMatch(Character::isISOControl))
+            throw new IOException("The effective schema cannot be safely represented in TVU configuration.");
+        return "\""+schema.replace("\"","\"\"")+"\"";
+    }
+    private static String quotedIdentifier(String value) {
+        if(value==null)return null;String text=value.strip();
+        if(text.length()<3||text.charAt(0)!='"'||text.charAt(text.length()-1)!='"')return null;
+        StringBuilder decoded=new StringBuilder();
+        for(int i=1;i<text.length()-1;i++){
+            char c=text.charAt(i);
+            if(Character.isISOControl(c))return null;
+            if(c=='"'){if(i+1>=text.length()-1||text.charAt(i+1)!='"')return null;i++;}
+            decoded.append(c);
+        }
+        return decoded.toString().isBlank()?null:decoded.toString();
     }
     public ConfigEvidence analyze(Path path) throws IOException {
         return analyze(path,path==null?null:path.toRealPath().getParent());
@@ -25,9 +94,9 @@ public final class ConfigAnalyzer {
         try {
             var parsed=SafeHocon.read(path,permittedRoot);Config cfg=parsed.config();
             String schema = value(cfg,"database.schema");
-            String hibernate = value(cfg,"hibernate.default_schema");
-            if (hibernate == null) hibernate=value(cfg,"database.hibernate.default_schema");
-            if (hibernate == null) hibernate=value(cfg,"\"hibernate.default_schema\"");
+            Map<String,String> hibernateDeclarations=new TreeMap<>();
+            for(String key:HIBERNATE_SCHEMA_KEYS){String declaration=value(cfg,key);if(declaration!=null)hibernateDeclarations.put(key,declaration);}
+            String hibernate=null;for(String key:HIBERNATE_SCHEMA_KEYS)if(hibernateDeclarations.containsKey(key)){hibernate=hibernateDeclarations.get(key);break;}
             String jdbc=value(cfg,"dataSourceProperties.dataSource.url");
             if (jdbc==null) jdbc=value(cfg,"dataSourceProperties.\"dataSource.url\"");
             if (jdbc==null) jdbc=value(cfg,"database.url");
@@ -41,6 +110,7 @@ public final class ConfigAnalyzer {
             List<String> issues=new ArrayList<>();
             TreeMap<String,Object> settings=new TreeMap<>();
             settings.put("configurationIncludes",parsed.includes());
+            settings.put("hibernateSchemaDeclarations",Collections.unmodifiableMap(hibernateDeclarations));
             for(String key:List.of("database.schema","database.url","dataSource.url","\"dataSource.url\"","dataSourceProperties.dataSource.url","dataSourceProperties.\"dataSource.url\"","connectionInitSql","dataSourceProperties.connectionInitSql","dataSourceProperties.\"dataSource.connectionInitSql\"","hibernate.default_schema","database.hibernate.default_schema","\"hibernate.default_schema\"","notary.validating","myLegalName")){
                 try{if(cfg.hasPath(key))cfg.getValue(key).valueType();}catch(ConfigException.NotResolved e){issues.add("Unresolved configuration value: "+key);}
             }
@@ -82,7 +152,8 @@ public final class ConfigAnalyzer {
                 settings.put(key+"Count",args.size()); settings.put(key+"SafeMemorySettings",List.copyOf(safeArgs));
             }
             List<String> declarations=new ArrayList<>();
-            for(String declared:Arrays.asList(schema,hibernate))if(declared!=null)declarations.add(identifier(declared));
+            if(schema!=null)declarations.add(identifier(schema));
+            for(String declared:hibernateDeclarations.values())declarations.add(identifier(declared));
             if(!jdbcPath.isEmpty())declarations.add(jdbcPath.get(0));
             if(!searchPath.isEmpty())declarations.add(searchPath.get(0));
             boolean conflict=declarations.stream().distinct().count()>1;
@@ -91,7 +162,7 @@ public final class ConfigAnalyzer {
             settings.put("schemaResolution",unresolvedSchema?"UNRESOLVED":conflict?"AMBIGUOUS":declarations.isEmpty()?"DEFAULT_UNVERIFIED":"CONFIGURED");
             settings.put("effectiveSchema",unresolvedSchema?"Unknown":conflict?"Ambiguous":declarations.isEmpty()?"Default (not independently established)":declarations.get(0));
             LinkedHashSet<String> schemas=new LinkedHashSet<>();
-            if(schema!=null)schemas.add(identifier(schema));if(hibernate!=null)schemas.add(identifier(hibernate));
+            if(schema!=null)schemas.add(identifier(schema));for(String declared:hibernateDeclarations.values())schemas.add(identifier(declared));
             schemas.addAll(jdbcPath);schemas.addAll(searchPath);
             String primary=unresolvedSchema||conflict||declarations.isEmpty()?"":declarations.get(0);
             settings.put("primarySchema",primary);
@@ -131,7 +202,7 @@ public final class ConfigAnalyzer {
     }
     private static String identifier(String declaration) {
         String value=declaration.strip();if(value.isEmpty())throw new IllegalArgumentException("Empty schema identifier");
-        if(value.startsWith("\"")){int end=1;StringBuilder out=new StringBuilder();while(end<value.length()){char c=value.charAt(end++);if(c=='"'){if(end<value.length()&&value.charAt(end)=='"'){out.append(c);end++;}else return out.toString();}else out.append(c);}throw new IllegalArgumentException("Unclosed schema identifier");}
+        if(value.startsWith("\"")){String quoted=quotedIdentifier(value);if(quoted==null)throw new IllegalArgumentException("Malformed quoted schema identifier");return quoted;}
         return value;
     }
     private static String value(Config c,String key) {

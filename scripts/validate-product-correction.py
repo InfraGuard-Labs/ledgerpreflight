@@ -24,7 +24,7 @@ def identity(a):
     assert d['currentCordappJars']==d['targetCordappJars']==2
     assert s['databaseVendor']=='PostgreSQL'
     assert any(j['role']=='TVU' for j in a['evidence']['upgrade-kit'])
-for name,kind,code,state,extra in [('environment','environment',1,'WARNING',()),('blocked','blocked',2,'BLOCKED',()),('ready-for-tvu','clean',1,'READY FOR TVU',()),('ready-to-upgrade','clean',0,'READY TO UPGRADE',('--tvu-results',fixture/'clean/tvu.log'))]:
+for name,kind,code,state,extra in [('environment','environment',1,'READY FOR TVU',()),('blocked','blocked',2,'BLOCKED',()),('ready-for-tvu','clean',1,'READY FOR TVU',()),('ready-to-upgrade','clean',0,'READY TO UPGRADE',('--tvu-results',fixture/'clean/tvu.log'))]:
     a,text=assess(name,kind,code,extra,json_output=False);identity(a);assert a['status']==state
     if kind=='blocked':
         tvu=a['evidence']['tvu-summary'];assert (tvu['expected'],tvu['processed'],tvu['succeeded'],tvu['failed'],tvu['detailedRecords'])==(650,650,449,201,201)

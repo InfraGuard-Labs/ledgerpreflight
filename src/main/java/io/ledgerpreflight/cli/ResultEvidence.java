@@ -82,9 +82,10 @@ final class ResultEvidence {
             List<String> additional=schemas.stream().map(Object::toString).filter(s->!s.equals(primary)).limit(4).toList();
             if(!additional.isEmpty())out.append("\n\nAdditional configured schemas\n").append(String.join("\n",additional));
         }
-        out.append("\n\nWhat LedgerPreflight found\n").append(issue.map(ProductView.Issue::happened).orElse("The effective schema needs confirmation."));
-        out.append("\n\nWhy this matters\n").append(issue.map(ProductView.Issue::matters).orElse("Node and TVU must use the intended schema."));
-        out.append("\n\nRecommended action\n").append(issue.map(ProductView.Issue::action).orElse("Confirm the intended schema before TVU validation."));
+        String setup=ProductView.schemaSetupStatus(a);boolean automatic=setup.equals("AUTO_CONFIGURABLE"),handled=setup.equals("HANDLED");
+        out.append("\n\nWhat LedgerPreflight found\n").append(issue.map(ProductView.Issue::happened).orElse(handled?"The supplied TVU run loaded the intended schema.":automatic?"The node uses a mixed-case PostgreSQL schema.":"The effective schema needs confirmation."));
+        out.append("\n\nWhy this matters\n").append(issue.map(ProductView.Issue::matters).orElse(handled?"The required TVU schema configuration is established for the supplied run.":"Node and TVU must use the intended schema."));
+        out.append("\n\nRecommended action\n").append(issue.map(ProductView.Issue::action).orElse(automatic?"Run TVU safely; LedgerPreflight will prepare the schema configuration.":handled?"Resolve any remaining validation blockers before upgrading.":"Confirm the intended schema before TVU validation."));
         return out.toString();
     }
     static String tvu(Assessment a){

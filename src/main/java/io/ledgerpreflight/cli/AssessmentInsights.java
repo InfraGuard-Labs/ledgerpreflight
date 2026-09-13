@@ -8,6 +8,33 @@ import java.util.*;
 /** Explanations and comparisons retain evidence identity, rather than comparing rule IDs alone. */
 public final class AssessmentInsights {
     private AssessmentInsights(){}
+    static boolean hasTvuArtifact(Assessment assessment) {
+        long found=0;for(JsonNode artifact:Reports.JSON.valueToTree(assessment.evidence().get("upgrade-kit")))if(artifact.path("role").asText().equals("TVU"))found++;
+        return found==1;
+    }
+    static boolean hasTvuSchemaSetup(Assessment assessment) {
+        JsonNode schema=Reports.JSON.valueToTree(assessment.evidence().get("schema-analysis")).path("safeSettings").path("tvuSchemaReadiness");
+        return schema.path("applicable").asBoolean()||Set.of("AUTO_CONFIGURABLE","HANDLED","REQUIRED_UNPROVEN").contains(schema.path("status").asText());
+    }
+    static String guidedSafety(GuidedTvuExecution.Plan plan) {
+        StringBuilder text=new StringBuilder("RUN TVU SAFELY\n────────────────────────────────────────\n\nTarget\nCorda "+plan.targetVersion()+"\n\nTVU\nFound · "+plan.tvuVersion()+"\n\nTarget CorDapps\n"+plan.targetCordapps()+" found\n\nDatabase\n"+plan.databaseTarget()+"\n\nSchema\n"+plan.schema()+"\n\nTVU schema setup\n"+(plan.schemaAutomatic()?"Will be configured automatically":"No automatic schema override is required")+"\n");
+        for(String warning:plan.warnings())text.append("\n! ").append(warning).append('\n');
+        text.append("\nDatabase safety\nTVU needs historical transactions from the node database.\nOnly confirm an isolated / non-production database copy.\nTVU may connect to and write to that confirmed database.\nYour source node and upgrade kit remain unchanged.\n");
+        text.append("\nExact execution command (no shell)\n").append(String.join(" ",plan.command().stream().map(AssessmentInsights::commandArgument).toList())).append('\n');
+        return text.toString();
+    }
+    private static String commandArgument(String value){return value.matches("[A-Za-z0-9_./:=,@+-]+")?value:"'"+value.replace("'","'\"'\"'")+"'";}
+    static String guidedProgress(GuidedTvuExecution.Progress progress) {
+        String processed=progress.processed()==null?"Not yet reported":progress.processed().toString();
+        if(progress.processed()!=null&&progress.expected()!=null)processed+=" / "+progress.expected();
+        long elapsed=Math.max(0,progress.elapsedSeconds());
+        return "Running TVU…\n────────────────────────────────────────\n\nTransactions processed  "+processed+
+            "\nFailures observed       "+(progress.failed()==null?"Not yet reported":progress.failed())+
+            "\nElapsed                 "+String.format(Locale.ROOT,"%02d:%02d:%02d",elapsed/3600,elapsed/60%60,elapsed%60)+"\nStatus                  In progress";
+    }
+    static String guidedOutcome(String failureKind) {
+        return switch(failureKind){case "SETUP_FAILURE"->"TVU setup failure";case "DATABASE_CONNECTION_FAILURE"->"TVU could not connect to the confirmed isolated database";case "EXECUTION_FAILURE"->"TVU exited before validation completed";case "TRANSACTION_VERIFICATION_FAILURE"->"Historical transaction verification failed";case "USER_CANCELLATION"->"TVU run cancelled; partial evidence saved";default->"TVU completed";};
+    }
     public static List<Finding> blockers(Assessment a){return a.findings().stream().filter(f->Set.of("BLOCKED","ERROR").contains(f.severity())).toList();}
     public static String summary(Assessment a) {
         if(a.status().equals("READY FOR TVU"))return "✓ STATIC PREFLIGHT PASSED\nSTATUS: READY FOR TVU\n\nStatic compatibility    PASS\nTVU validation          REQUIRED\n\nREMAINING GATE\nComplete TVU validation before proceeding.\n";

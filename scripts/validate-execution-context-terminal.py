@@ -115,7 +115,7 @@ class Terminal:
 
     def action(self, label):
         lines = list(self.screen.display)
-        first = next(i for i, line in enumerate(lines) if line.startswith('> '))
+        first = max(i for i, line in enumerate(lines) if line.startswith('> '))
         choices = []
         for line in lines[first:]:
             if 'Up/Down' in line:

@@ -85,6 +85,8 @@ public final class Reports {
         out.append(remaining).append('\n');
     }
     public static String html(Assessment a){
+        List<ProductView.Issue> grouped=ProductView.issues(a);
+        long blockerGroups=grouped.stream().filter(ProductView.Issue::blocking).count();
         List<Finding> blockers=a.findings().stream().filter(f->Set.of("BLOCKED","ERROR").contains(f.severity())).toList();
         List<Finding> unknown=a.findings().stream().filter(f->f.severity().equals("UNKNOWN")).toList();
         long warnings=a.findings().stream().filter(f->f.severity().equals("WARNING")).count();
@@ -104,17 +106,21 @@ public final class Reports {
             </style></head><body><main><header><div><h1>LedgerPreflight</h1><div class="eyebrow">Upgrade assurance report</div></div><div class="meta"><strong>
             """);
         h.append(escape(a.sourceVersion())).append(" → ").append(escape(a.targetVersion())).append("</strong>Current environment → prepared target<br>Offline assessment · read-only inputs</div></header>");
-        h.append("<section class=\"decision\" aria-label=\"Assessment decision\"><div><div class=\"state ").append(tone).append("\">").append(escape(ProductView.state(a))).append("</div><p class=\"disposition\">").append(disposition).append("</p></div><div class=\"counts\"><div><strong class=\"blocked\">").append(blockers.size()).append("</strong><span>Blockers</span></div><div><strong class=\"review\">").append(warnings).append("</strong><span>Warnings</span></div><div><strong class=\"ready\">").append(passed).append("</strong><span>Passed checks</span><span>of ").append(gates.size()).append(" readiness gates</span></div></div></section>");
+        h.append("<section class=\"decision\" aria-label=\"Assessment decision\"><div><div class=\"state ").append(tone).append("\">").append(escape(ProductView.state(a))).append("</div><p class=\"disposition\">").append(disposition).append("</p></div><div class=\"counts\"><div><strong class=\"blocked\">").append(blockerGroups).append("</strong><span>Blockers</span></div><div><strong class=\"review\">").append(warnings).append("</strong><span>Warnings</span></div><div><strong class=\"ready\">").append(passed).append("</strong><span>Passed checks</span><span>of ").append(gates.size()).append(" readiness gates</span></div></div></section>");
         h.append("<div class=\"first-page\"><section aria-labelledby=\"stops-heading\"><h2 id=\"stops-heading\">What stops this upgrade</h2><ul class=\"stop-list\">");
-        List<Finding> priority=blockers.isEmpty()?unknown:blockers;
-        List<ProductView.Issue> grouped=ProductView.issues(a);
-        for(var issue:grouped.stream().limit(3).toList())h.append("<li><h3>").append(issue.warning()?"! ":"").append(escape(issue.title())).append("</h3><p><strong>What happened:</strong> ").append(escape(issue.happened())).append("</p><p><strong>Why it matters:</strong> ").append(escape(issue.matters())).append("</p><p><strong>What to do:</strong> ").append(escape(issue.action())).append("</p></li>");
+        int ordinal=0,details=0;
+        for(var issue:grouped) {
+            h.append("<li><h3>").append(issue.blocking()?(++ordinal)+". ":issue.warning()?"! ":"? ").append(escape(issue.title())).append("</h3>");
+            if(details++<3)h.append("<p><strong>What happened:</strong> ").append(escape(issue.summaryHappened())).append("</p><p><strong>Why it matters:</strong> ").append(escape(issue.summaryMatters())).append("</p><p><strong>What to do:</strong> ").append(escape(issue.summaryAction())).append("</p>");
+            else h.append("<p>Details and recommended action are in the technical findings below.</p>");
+            h.append("</li>");
+        }
         if(grouped.isEmpty())h.append("<li><h3>").append(a.status().equals("READY TO UPGRADE")?"No blockers in the supplied evidence":a.status().equals("READY FOR TVU")?"Required TVU validation is outstanding":"Warning review is outstanding").append("</h3><p>").append(disposition).append("</p></li>");
         h.append("</ul>");
-        if(grouped.size()>3)h.append("<p class=\"review-note\">Showing 3 of ").append(grouped.size()).append(" issue groups. <a href=\"#technical\">Review all technical findings below.</a></p>");
+        if(grouped.size()>3)h.append("<p class=\"review-note\">All issue groups are listed above. <a href=\"#technical\">Review their complete technical findings below.</a></p>");
         if(!unknown.isEmpty()&&!blockers.isEmpty())h.append("<p class=\"review-note\">").append(unknown.size()).append(" additional findings have incomplete evidence.</p>");
         h.append("</section><section class=\"action-panel\" aria-labelledby=\"actions-heading\"><h2 id=\"actions-heading\">What to do next</h2><ol class=\"actions\">");
-        List<String> actions=grouped.stream().filter(i->!i.title().equals("TVU validation")).map(ProductView.Issue::action).distinct().limit(2).toList();
+        List<String> actions=grouped.stream().filter(i->!i.title().equals("TVU validation")).map(ProductView.Issue::summaryAction).distinct().limit(2).toList();
         for(String action:actions)h.append("<li>").append(escape(shortText(action,215))).append("</li>");
         h.append("<li>").append(a.status().equals("READY TO UPGRADE")?"Continue the official R3 upgrade procedure, lower-environment validation and your production change process.":"Rerun the complete TVU validation, then reassess with its results.").append("</li></ol><p class=\"review-note\">Full instructions and supporting evidence are retained below.</p></section></div>");
         h.append("<section class=\"technical\" id=\"technical\"><h2>Technical evidence</h2><p>Expand the sections needed for engineering review or a change request. Descriptors, inventories and traces are secondary to the decision above.</p><details><summary>All findings — blockers, warnings and evidence gaps (").append(a.findings().size()).append(")</summary>");

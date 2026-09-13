@@ -75,7 +75,7 @@ class ExecutionContextUxTest {
         assertEquals(List.of("CorDapp compatibility","Compatibility analysis incomplete"),ProductView.issues(a).stream().map(ProductView.Issue::title).toList());
         String result=ProductView.result(a),text=ResultEvidence.compatibility(a);
         assertTrue(result.contains("Additional compatibility analysis is incomplete."));
-        assertTrue(result.contains("NEXT STEP\nResolve the CorDapp compatibility issue first."));
+        assertTrue(result.contains("NEXT STEP\nResolve the CorDapp compatibility blocker and complete the unresolved reviews."));
         assertTrue(text.contains("Method missing"));assertTrue(text.contains("Class lookup incomplete · Method lookup incomplete"));
         assertTrue(text.contains("The confirmed incompatibility still needs resolution."));quiet(result);quiet(text);
     }
@@ -85,13 +85,13 @@ class ExecutionContextUxTest {
         assertTrue(result.indexOf("CorDapp compatibility")<result.indexOf("Compatibility analysis incomplete"));
         assertTrue(text.indexOf("Amounts.total")<text.indexOf("Unresolved.total"));
         assertFalse(text.contains("example-other.jar"));assertTrue(text.contains("example-contracts.jar"));
-        assertTrue(result.contains("NEXT STEP\nResolve the CorDapp compatibility issue first."));quiet(result);quiet(text);
+        assertTrue(result.contains("NEXT STEP\nResolve the CorDapp compatibility blocker and complete the unresolved reviews."));quiet(result);quiet(text);
     }
     @Test void targetPairingUncertaintyIsASeparateReview(){
         Finding mapping=Finding.of("LP-CORDAPP-005","Current CorDapp has no unique target match","WARNING","CORDAPP","HIGH","INPUT","assessment",List.of("target/cordapps/example-rebuilt.jar"),"Rebuild coverage is uncertain","Supply a unique replacement");
         var a=assessment(List.of(mapping,both()));String result=ProductView.result(a),text=ResultEvidence.compatibility(a);
         assertEquals(List.of("CorDapp compatibility","Target CorDapp mapping"),ProductView.issues(a).stream().map(ProductView.Issue::title).toList());
-        assertTrue(result.contains("Target CorDapp mapping: unresolved."));assertTrue(result.contains("1 issue needs attention"));
+        assertTrue(result.contains("Target CorDapp mapping: unresolved."));assertTrue(result.contains("1 blocker"));
         assertFalse(result.contains("Compatibility analysis incomplete"));assertTrue(text.contains("Runtime API compatibility was checked independently."));
         assertFalse(text.contains("example-rebuilt.jar"));assertTrue(text.contains("Method missing"));quiet(result);quiet(text);
     }
@@ -117,7 +117,7 @@ class ExecutionContextUxTest {
         var a=assessment(List.of(both()));String json=Reports.json(a);
         for(String term:List.of("targetResolution","verifierResolution","verifierClass","verifierMember","TARGET_NODE_RUNTIME","TARGET_VERIFIER",DESC,"sourceClass","sourceMethod","INVOKESTATIC"))assertTrue(json.contains(term),term);
         assertTrue(ProductView.result(a).lines().count()<30);assertFalse(ResultEvidence.hasTvu(a));
-        assertEquals(List.of("View compatibility evidence","Export full technical report","Create R3 support package","Run again","Exit"),InteractiveSession.actions(a).stream().map(x->x.label).toList());
+        assertEquals(List.of("Import existing TVU results","View compatibility evidence","Export full technical report","Create R3 support package","Exit"),InteractiveSession.actions(a).stream().map(x->x.label).toList());
         quiet(ResultEvidence.compatibility(a));quiet(ProductView.result(a));
     }
     @Test void schemaWordingAndStructureRemainUnchangedWithContextFindings(){

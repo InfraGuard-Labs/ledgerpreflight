@@ -69,9 +69,12 @@ public class RealDiscoveryRegressionTest {
         Path conf=root.resolve("node.conf");Files.writeString(conf,"database.schema=ExampleMixedCaseIssuer\ndataSource.url=\"jdbc:postgresql://example.net/example?currentSchema=other\"");
         var cfg=new ConfigAnalyzer().analyze(conf);assertTrue(cfg.contradictory());assertEquals("Ambiguous",cfg.safeSettings().get("effectiveSchema"));assertEquals("Explicit schema declarations disagree",cfg.safeSettings().get("schemaExplanation"));
     }
-    @Test void assessmentPreservesIdentityAndMixedCaseFinding()throws Exception {
+    @Test void assessmentPreservesIdentityAndAutomaticMixedCaseReadiness()throws Exception {
         var f=fixture(root);var a=new AssessmentService().assess(f.options(false));assertEquals("4.11.6",a.sourceVersion());assertEquals("4.12.11",a.targetVersion());
-        assertTrue(a.findings().stream().anyMatch(x->x.category().equals("DATABASE_SCHEMA")&&x.title().toLowerCase().contains("case")));
+        assertFalse(a.findings().stream().anyMatch(x->x.id().equals("LP-DB-001")));
+        var config=(ConfigAnalyzer.ConfigEvidence)a.evidence().get("schema-analysis");
+        assertTrue(config.mixedCase());
+        assertEquals("AUTO_CONFIGURABLE",ProductView.schemaSetupStatus(a));
         assertEquals("ExampleIssuer",((Map<?,?>)a.evidence().get("environment")).get("nodeName"));
         assertEquals(2,((List<?>)a.evidence().get("cordapps-current")).size());assertEquals(2,((List<?>)a.evidence().get("cordapps-target")).size());
     }

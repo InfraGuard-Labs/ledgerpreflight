@@ -193,8 +193,8 @@ def main():
         assert 'actual Ubuntu PTY emulator cell buffer' in item['source']
         quiet(path.with_name(path.name + '.txt').read_text())
     unchanged = read(ROOT / 'hierarchy-frozen-ux-proof.json')
-    assert unchanged['baselineCommit'] == 'd9f9ed1aee7107e918b5b48b626ec32af21d9d40'
-    assert all(unchanged[key] is True for key in ('environmentUnchanged', 'schemaMethodUnchanged', 'productViewUnchanged', 'resultEvidenceUnchanged'))
+    assert unchanged['baselineCommit'] == 'b49faabf9baffc537cb38bff845e1f93dc079a79'
+    assert all(unchanged[key] is True for key in ('environmentUnchanged', 'legacySchemaCaseVerified', 'tvuCorrelationUnchanged', 'compatibilityMethodUnchanged', 'tvuMethodUnchanged'))
     integration = 'HierarchyIntegrationTest'
     evidence = {
         'A': [case('JvmHierarchyResolutionTest', 'inheritedStaticMethodPreservesPublicFacadeAndDeclaringOrigin'), case(integration, 'publicFacadeThroughNonPublicGeneratedLayersLinksInTheJvm')],

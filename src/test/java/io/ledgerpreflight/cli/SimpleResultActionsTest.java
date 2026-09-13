@@ -15,22 +15,22 @@ class SimpleResultActionsTest {
     private List<String> actions(Assessment a){return InteractiveSession.actions(a).stream().map(x->x.label).toList();}
     @Test void compatibilitySchemaAndSuppliedTvuHaveExactlyTheRequestedActions()throws Exception{
         var f=ProductAcceptanceFixture.create(root,true,true);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,true));
-        assertEquals(List.of("View compatibility evidence","View schema evidence","View TVU evidence","Export full technical report","Create R3 support package","Run again","Exit"),actions(a));
+        assertEquals(List.of("View compatibility evidence","View TVU evidence","View schema evidence","Export full technical report","Create R3 support package","Run TVU again","Import existing TVU results","Exit"),actions(a));
     }
     @Test void compatibilityOnlyDoesNotOfferSchemaOrTvu(){
         var f=Finding.of("LP-API-001","Missing method","BLOCKED","API_COMPATIBILITY","HIGH","RUNTIME_DISCOVERY","app.jar",List.of(),"Historical verification may fail","Use a compatible runtime");
         var a=new Assessment("1","0.1.0","BLOCKED","4.11.6","4.12.11",List.of(f),Map.of());
-        assertEquals(List.of("View compatibility evidence","Export full technical report","Create R3 support package","Run again","Exit"),actions(a));
+        assertEquals(List.of("Import existing TVU results","View compatibility evidence","Export full technical report","Create R3 support package","Exit"),actions(a));
     }
-    @Test void readyForTvuOffersInstructionsWithoutInventingEvidence()throws Exception{
+    @Test void readyForTvuOffersGuidedExecutionWithoutInventingEvidence()throws Exception{
         var f=ProductAcceptanceFixture.create(root,false,false);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,false));
         assertEquals("READY FOR TVU",a.status());
-        assertEquals(List.of("TVU instructions","Export full technical report","Create R3 support package","Run again","Exit"),actions(a));
+        assertEquals(List.of("Run TVU safely","Import existing TVU results","Export full technical report","Create R3 support package","Exit"),actions(a));
     }
     @Test void readyToUpgradeShowsSuppliedTvuAndExportSupportActions()throws Exception{
         var f=ProductAcceptanceFixture.create(root,false,false);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,true));
         assertEquals("READY TO UPGRADE",a.status());
-        assertEquals(List.of("View TVU evidence","Export full technical report","Create R3 support package","Run again","Exit"),actions(a));
+        assertEquals(List.of("View TVU evidence","Export full technical report","Create R3 support package","Run TVU again","Import existing TVU results","Exit"),actions(a));
     }
     @Test void threeEvidenceViewsAreHumanReadableAndPreserveCorrelationScope()throws Exception{
         var f=ProductAcceptanceFixture.create(root,true,true);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,true));
@@ -46,7 +46,7 @@ class SimpleResultActionsTest {
         List<Finding> findings=new ArrayList<>();
         for(int i=0;i<1028;i++)findings.add(Finding.of("LP-INPUT-001","Input diagnostic","WARNING","SECURITY","UNKNOWN","INPUT","artifact-"+i,List.of(),"Compatibility unproven","Review supplied inputs"));
         var a=new Assessment("1","0.1.0","WARNING","4.11.6","4.12.11",findings,Map.of());String text=ProductView.result(a);
-        assertTrue(text.contains("1 review needs attention"));for(String forbidden:List.of("1028","warnings","LP-","retained","currentInventory"))assertFalse(text.contains(forbidden),forbidden);
+        assertTrue(text.contains("0 blockers"));for(String forbidden:List.of("1028","warnings","LP-","retained","currentInventory"))assertFalse(text.contains(forbidden),forbidden);
     }
     @Test void exportKeepsRawDiagnosticsWithoutAnInteractiveBrowser()throws Exception{
         var f=ActiveRuntimeRegressionTest.fixture(root.resolve("node"));var o=ProductAcceptanceFixture.options(f,true);var a=new AssessmentService().assess(o);
@@ -66,12 +66,12 @@ class SimpleResultActionsTest {
         for(String term:List.of("Unknown","corda.jar-old","Inactive","confidence","coverage","drivers","warnings"))assertFalse(text.contains(term),term);
         ActiveRuntimeRegressionTest.assertActive(new AssessmentService().assess(options));
     }
-    @Test void ambiguousCurrentSelectionSurvivesContinueAndReassessment()throws Exception{
+    @Test void ambiguousCurrentSelectionSurvivesImportAndReassessment()throws Exception{
         var f=ActiveRuntimeRegressionTest.fixture(root);Files.move(f.node().resolve("corda.jar"),f.node().resolve("selected-runtime.bin"));
         StringWriter output=new StringWriter();var options=DiscoverySession.prepare(ProductAcceptanceFixture.options(f,true),new SessionTerminal(new StringReader("3\n1\n"),new PrintWriter(output),false,100));
         assertNotNull(options);assertEquals("selected-runtime.bin",options.currentRuntime().getFileName().toString());assertTrue(output.toString().contains("Select active current Corda runtime"));
         var a=new AssessmentService().assess(options);ActiveRuntimeRegressionTest.assertActive(a);
-        StringWriter session=new StringWriter();new InteractiveSession(options,a,root.resolve("reports"),new SessionTerminal(new StringReader("6\nq\n"),new PrintWriter(session),false,100)).run();
+        StringWriter session=new StringWriter();new InteractiveSession(options,a,root.resolve("reports"),new SessionTerminal(new StringReader("7\n"+f.log()+"\n2\n"+f.errors()+"\n1\nq\n"),new PrintWriter(session),false,100)).run();
         assertTrue(session.toString().contains("Assessment updated"));assertFalse(session.toString().contains("Corda unknown"));
     }
 }

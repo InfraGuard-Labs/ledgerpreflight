@@ -10,9 +10,10 @@ import java.util.*;
 /** A live assessment session. Each action operates on the currently selected target. */
 public final class InteractiveSession {
     enum Action {
+        RUN("Run TVU safely"), RUN_AGAIN("Run TVU again"), IMPORT("Import existing TVU results"),
         COMPATIBILITY("View compatibility evidence"), SCHEMA("View schema evidence"), TVU("View TVU evidence"),
-        EXPORT("Export full technical report"), SUPPORT("Create R3 support package"), AGAIN("Run again"),
-        INSTRUCTIONS("TVU instructions"), EXIT("Exit");
+        EXPORT("Export full technical report"), SUPPORT("Create R3 support package"),
+        EXIT("Exit");
         final String label;Action(String label){this.label=label;}
     }
     private AssessmentService.Options options;
@@ -20,22 +21,32 @@ public final class InteractiveSession {
     private Path output;
     private final Path sessionRoot;
     private final SessionTerminal terminal;
+    private Path tvuNodeConf;
+    private String tvuSchema;
     private final SortedSet<Path> generated=new TreeSet<>();
     public InteractiveSession(AssessmentService.Options options,Assessment assessment,Path output,SessionTerminal terminal) {
         this.options=options;this.assessment=assessment;this.output=output.toAbsolutePath().normalize();this.sessionRoot=this.output;this.terminal=terminal;
         rememberReports(this.output);
     }
+    public InteractiveSession(AssessmentService.Options options,Assessment assessment,Path output,SessionTerminal terminal,Path tvuNodeConf,String tvuSchema) {
+        this(options,assessment,output,terminal);this.tvuNodeConf=tvuNodeConf;this.tvuSchema=tvuSchema;
+    }
     static List<Action> actions(Assessment assessment) {
         List<Action> actions=new ArrayList<>();
+        boolean supplied=ResultEvidence.hasTvu(assessment),runnable=AssessmentInsights.hasTvuArtifact(assessment);
+        if(!supplied){if(runnable)actions.add(Action.RUN);actions.add(Action.IMPORT);}
         if(ResultEvidence.hasCompatibility(assessment))actions.add(Action.COMPATIBILITY);
-        if(ResultEvidence.hasSchema(assessment))actions.add(Action.SCHEMA);
         if(ResultEvidence.hasTvu(assessment))actions.add(Action.TVU);
-        if(assessment.status().equals("READY FOR TVU"))actions.add(Action.INSTRUCTIONS);
-        actions.addAll(List.of(Action.EXPORT,Action.SUPPORT,Action.AGAIN,Action.EXIT));
+        if(ResultEvidence.hasSchema(assessment)||AssessmentInsights.hasTvuSchemaSetup(assessment))actions.add(Action.SCHEMA);
+        actions.addAll(List.of(Action.EXPORT,Action.SUPPORT));
+        if(supplied){if(runnable)actions.add(Action.RUN_AGAIN);actions.add(Action.IMPORT);}
+        actions.add(Action.EXIT);
         return List.copyOf(actions);
     }
-    public int run()throws IOException {
+    public int run()throws IOException {return run(false);}
+    public int run(boolean startWithTvu)throws IOException {
         Reports.write(output,Reports.files(assessment));
+        if(startWithTvu)try{runTvu();}catch(Exception e){terminal.text("TVU setup could not complete: "+Objects.toString(e.getMessage(),"Review the supplied configuration."));}
         while(true) {
             terminal.screen();terminal.text(ProductView.result(assessment));
             List<Action> choices=actions(assessment);
@@ -46,23 +57,16 @@ public final class InteractiveSession {
             }
             terminal.screen();
             try {switch(choices.get(selected)){
+                case RUN,RUN_AGAIN -> runTvu();
+                case IMPORT -> importTvu();
                 case COMPATIBILITY -> {terminal.text(ResultEvidence.compatibility(assessment));terminal.choose("",List.of("Back"));}
                 case SCHEMA -> {terminal.text(ResultEvidence.schema(assessment));terminal.choose("",List.of("Back"));}
                 case TVU -> {terminal.text(ResultEvidence.tvu(assessment));terminal.choose("",List.of("Back"));}
                 case EXPORT -> {report();terminal.choose("",List.of("Back"));}
                 case SUPPORT -> {support();terminal.choose("",List.of("Back"));}
-                case AGAIN -> reanalyze(options,fresh("reassessment"));
-                case INSTRUCTIONS -> instructions();
                 default -> {}
             }}catch(Exception e){terminal.text("! Action could not complete: "+Objects.toString(e.getMessage(),"unknown error")+"\nYour current assessment remains available.");terminal.choose("",List.of("Back"));}
         }
-    }
-    private void instructions()throws Exception {
-        terminal.text("TVU INSTRUCTIONS\n\n"+AssessmentInsights.tvuReadiness(assessment,options.tvuJar()));
-        terminal.text("Validate a backed-up isolated node and database copy first.\nUse the target TVU and rebuilt target CorDapps.\nConfirm the intended Hibernate default schema for TVU.\nStatic analysis does not replace complete TVU validation.\n\nSupply completed logs or an error ZIP with --tvu-results, or import below.");
-        int choice=terminal.choose("",List.of("Import TVU evidence","Run TVU on an isolated copy","Back"));
-        if(choice==0)importTvu();else if(choice==1)runTvu();else return;
-        terminal.choose("",List.of("Continue"));
     }
     private void report()throws IOException {
         terminal.text("Generating complete technical assessment…");
@@ -81,11 +85,7 @@ public final class InteractiveSession {
         String stem=node+"-R3-support-"+java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"));
         Path zip=sessionRoot.resolve(stem+".zip");
         for(int sequence=2;Files.exists(zip,LinkOption.NOFOLLOW_LINKS)||Files.exists(zip.resolveSibling(zip.getFileName()+".sha256"),LinkOption.NOFOLLOW_LINKS);sequence++)zip=sessionRoot.resolve(stem+"-"+sequence+".zip");
-        new SupportBundle().create(zip,Main.bundleFiles(Reports.files(assessment)));
-        String hash;
-        try(InputStream in=Files.newInputStream(zip)){var digest=java.security.MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1)digest.update(buffer,0,n);hash=HexFormat.of().formatHex(digest.digest());}
-        catch(java.security.NoSuchAlgorithmException e){throw new IOException(e);}
-        Path checksum=zip.resolveSibling(zip.getFileName()+".sha256");Files.writeString(checksum,hash+"  "+zip.getFileName()+"\n",StandardOpenOption.CREATE_NEW);
+        Path checksum=Main.createSupportPackage(zip,Main.bundleFiles(Reports.files(assessment)));
         generated.add(zip);generated.add(checksum);
         terminal.text("READY TO SHARE\n\nFile:\n"+zip+"\n\nSafety:\n✓ Secrets redacted\n✓ Private keys excluded\n✓ Keystores excluded\n✓ Final package rescanned\n✓ SHA-256 generated\n\nChecksum file:\n"+checksum);
     }
@@ -95,28 +95,59 @@ public final class InteractiveSession {
         for(Path path:generated)if(Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)){terminal.text(path.toString());count++;}
         if(count==0)terminal.text("No generated files yet. Choose Generate technical assessment.");
     }
-    private void prepare() {
-        terminal.text("TVU PREPARATION · "+assessment.targetVersion()+"\n"+AssessmentInsights.header(assessment));
-        terminal.text("1. Prepare a backed-up, isolated node copy and a disposable database copy.\n2. Configure the copy's node.conf to use that database; keep the real node unchanged.\n3. Place the intended target CorDapps and dependencies in the copy's cordapps/legacy-jars directories.\n4. Review missing-runtime, API and schema findings before execution.\n5. Inspect and explicitly approve the command before running TVU.\nTVU may write to the selected copy and contact its configured database. LedgerPreflight does not create or migrate databases.\nGuide: https://docs.r3.com/en/platform/corda/4.12/enterprise/node/operating/tvu/running-tvu.html");
-    }
     private void runTvu()throws Exception {
-        prepare();String input=terminal.ask("Prepared isolated validation-copy directory");if(input.isEmpty())return;
-        Path capture=fresh("tvu-run");
-        TvuExecution.Plan plan=TvuExecution.prepare(options,assessment,Path.of(input),capture);
-        terminal.text("REVIEW EXECUTION\nTarget TVU version: "+assessment.targetVersion()+"\nNode copy: "+plan.base()+"\nDatabase: "+TvuExecution.databaseTarget(plan.base().resolve("node.conf"))+"\nRead-only: No — approved TVU may write to the isolated copy.\nWorking directory: "+plan.base()+"\nCommand arguments (no shell):\n"+Reports.json(plan.command())+"\nCapture directory: "+capture+
-            "\nThe supplied TVU will execute with your permissions and connect to the copy's database. Confirm the copy is isolated, the TVU is trusted, and the database is disposable. No migration is requested.\nType RUN TVU ON COPY to approve; anything else cancels.");
-        if(!terminal.ask("Confirmation").equals("RUN TVU ON COPY")){terminal.text("TVU execution cancelled.");return;}
-        int code;
-        try{code=TvuExecution.run(plan,true,terminal,3600);}catch(Exception e){terminal.text("TVU run incomplete. Captures: "+capture);markRunFailure(capture,"TVU run was interrupted, exceeded limits or could not be captured.");return;}
-        terminal.text("TVU exited with code "+code+". Analyzing captured evidence…");
-        if(code!=0){markRunFailure(capture,"TVU exited with code "+code+"; complete successful execution is not established.");return;}
-        reanalyze(withTvu(List.of(capture)),fresh("validated"));
+        while(true){
+            if(!chooseSchemaIfNeeded())return;
+            GuidedTvuExecution.Plan plan;
+            try{plan=GuidedTvuExecution.inspect(options,assessment,tvuNodeConf,tvuSchema,sessionRoot);}
+            catch(IOException e){
+                terminal.screen();terminal.text("TVU SETUP FAILURE\n\n"+Objects.toString(e.getMessage(),"The supplied configuration could not be validated."));
+                if(terminal.choose("",List.of("Use a different safe node configuration","Cancel"))!=0)return;
+                if(!chooseTvuConfig())return;continue;
+            }
+            terminal.screen();terminal.text(AssessmentInsights.guidedSafety(plan));
+            int approval=terminal.choose("Is this an isolated / non-production database copy?",List.of("Yes, run TVU","Use a different safe node configuration","Cancel"));
+            if(approval==1){if(!chooseTvuConfig())return;continue;}
+            if(approval!=0){terminal.text("TVU cancelled. No process was started.");return;}
+            GuidedTvuExecution.Outcome result;
+            try(var progress=terminal.progress()){
+                result=GuidedTvuExecution.run(plan,true,86400,p->progress.show(AssessmentInsights.guidedProgress(p)),progress::cancelled);
+            }
+            AssessmentService.Options candidate=withTvu(result.evidencePaths());
+            commit(candidate,assessGuided(candidate,result),fresh("validated"));
+            return;
+        }
     }
-    private void markRunFailure(Path capture,String message)throws IOException {
-        AssessmentService.Options candidate=withTvu(List.of(capture));Assessment next=new AssessmentService().assess(candidate);
-        List<Finding> findings=new ArrayList<>(next.findings());findings.add(Finding.of("LP-TVU-EXEC","Approved TVU run did not complete successfully","UNKNOWN","TVU","HIGH","PROCESS_EXECUTION","TVU",List.of(message),"This run cannot establish final readiness","Review the private capture and rerun complete TVU."));
-        next=new Assessment(next.schemaVersion(),next.productVersion(),Assessment.readiness(findings,false,true),next.sourceVersion(),next.targetVersion(),findings,next.evidence());
-        commit(candidate,next,fresh("incomplete-tvu"));
+    private boolean chooseTvuConfig()throws IOException {
+        String value=terminal.ask("Safe node configuration path (credentials stay in the file)");if(value.isEmpty())return false;
+        Path selected=Path.of(value);Main.ensureOutputSeparate(sessionRoot,selected);SafeInputs.checkPath(selected);
+        tvuNodeConf=selected;tvuSchema=null;return true;
+    }
+    private boolean chooseSchemaIfNeeded()throws IOException {
+        if(tvuSchema!=null&&!tvuSchema.isBlank())return true;
+        ConfigAnalyzer.ConfigEvidence config=tvuNodeConf==null&&assessment.evidence().get("schema-analysis") instanceof ConfigAnalyzer.ConfigEvidence c?c:new ConfigAnalyzer().analyze(tvuNodeConf);
+        if(!Objects.toString(config.safeSettings().get("primarySchema"),"").isBlank())return true;
+        List<String> candidates=new ArrayList<>();
+        if(config.safeSettings().get("schemas") instanceof List<?> schemas)for(Object item:schemas)if(item instanceof String name&&!name.isBlank()&&!candidates.contains(name))candidates.add(name);
+        if(candidates.isEmpty())return true;
+        List<String> choices=new ArrayList<>(candidates);choices.add("Cancel");
+        terminal.screen();terminal.text("TVU SCHEMA\n\nThe effective primary schema is not established.\nSelect the intended schema from the discovered configuration.");
+        int selected=terminal.choose("Intended TVU schema",choices);if(selected<0||selected>=candidates.size())return false;
+        tvuSchema=candidates.get(selected);return true;
+    }
+    static Assessment assessGuided(AssessmentService.Options candidate,GuidedTvuExecution.Outcome outcome)throws IOException {
+        Assessment next=new AssessmentService().assess(candidate);
+        next=AssessmentService.withGuidedSchemaProof(candidate,next,Objects.toString(outcome.manifest().get("schema"),""));
+        Map<String,Object> evidence=new TreeMap<>(next.evidence());evidence.put("tvu-run",outcome.manifest());
+        List<Finding> findings=new ArrayList<>(next.findings());
+        String manifestKind=Objects.toString(outcome.manifest().get("failureKind"),outcome.failureKind());
+        boolean failed=outcome.cancelled()||outcome.exitCode()!=0||!outcome.failureKind().equals("NONE")||!manifestKind.equals("NONE")
+            ||Boolean.FALSE.equals(outcome.manifest().get("workspaceCleaned"))||Boolean.TRUE.equals(outcome.manifest().get("manifestWriteFailure"));
+        String failureKind=outcome.failureKind().equals("NONE")?(manifestKind.equals("NONE")?"EXECUTION_FAILURE":manifestKind):outcome.failureKind();
+        if(failed&&findings.stream().noneMatch(f->f.category().equals("TVU")&&f.severity().equals("BLOCKED")))
+            findings.add(Finding.of("LP-TVU-EXEC",AssessmentInsights.guidedOutcome(failureKind),"UNKNOWN","TVU","HIGH","PROCESS_EXECUTION","TVU",List.of("Exit code: "+outcome.exitCode(),"Run outcome: "+failureKind),"This run cannot establish complete upgrade readiness","Review the captured evidence and run TVU safely again."));
+        boolean successful=!failed&&next.evidence().get("tvu-summary") instanceof TvuAnalyzer.TvuEvidence tvu&&tvu.completeSuccess();
+        return new Assessment(next.schemaVersion(),next.productVersion(),Assessment.readiness(findings,successful,true),next.sourceVersion(),next.targetVersion(),findings,Collections.unmodifiableMap(evidence));
     }
     private void importTvu()throws IOException {
         List<Path> paths=new ArrayList<>();String path=terminal.ask("TVU log, error ZIP or directory from one complete run");if(path.isEmpty())return;paths.add(Path.of(path));
@@ -124,7 +155,8 @@ public final class InteractiveSession {
         for(Path p:paths){Main.ensureOutputSeparate(sessionRoot,p);if(!Files.exists(p))throw new IOException("TVU evidence path does not exist");}
         reanalyze(withTvu(paths),fresh("imported-tvu"));
     }
-    private AssessmentService.Options withTvu(List<Path> paths){return new AssessmentService.Options(options.node(),options.kit(),options.targetCorda(),options.tvuJar(),options.targetCordapps(),options.legacyJars(),options.nodeConf(),paths,options.verifierClasspath(),options.rulePack(),options.networkMode(),options.hostEnvironment(),options.currentRuntime());}
+    private AssessmentService.Options withTvu(List<Path> paths){return withTvu(options,paths);}
+    static AssessmentService.Options withTvu(AssessmentService.Options options,List<Path> paths){return new AssessmentService.Options(options.node(),options.kit(),options.targetCorda(),options.tvuJar(),options.targetCordapps(),options.legacyJars(),options.nodeConf(),paths,options.verifierClasspath(),options.rulePack(),options.networkMode(),options.hostEnvironment(),options.currentRuntime());}
     private void reanalyze(AssessmentService.Options candidate,Path destination)throws IOException {commit(candidate,new AssessmentService().assess(candidate,terminal::text),destination);}
     private void commit(AssessmentService.Options candidate,Assessment next,Path destination)throws IOException {
         Reports.write(destination,Reports.files(next));options=candidate;assessment=next;output=destination;

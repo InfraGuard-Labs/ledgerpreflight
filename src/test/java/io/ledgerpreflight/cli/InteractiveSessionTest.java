@@ -2,6 +2,7 @@ package io.ledgerpreflight.cli;
 
 import io.ledgerpreflight.core.*;
 import io.ledgerpreflight.integration.SyntheticFixtureFactory;
+import io.ledgerpreflight.integration.GuidedTvuFixtureFactory;
 import io.ledgerpreflight.reporting.Reports;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -20,8 +21,8 @@ class InteractiveSessionTest {
     @Test void menusFollowActualState(){
         var pending=new Assessment("1","0.1.0","READY FOR TVU","4.11","4.12",List.of(),Map.of());
         var complete=new Assessment("1","0.1.0","READY TO UPGRADE","4.11","4.12",List.of(),Map.of("tvu-evidence-supplied",true));
-        assertEquals(List.of("TVU instructions","Export full technical report","Create R3 support package","Run again","Exit"),InteractiveSession.actions(pending).stream().map(a->a.label).toList());
-        assertEquals(List.of("View TVU evidence","Export full technical report","Create R3 support package","Run again","Exit"),InteractiveSession.actions(complete).stream().map(a->a.label).toList());
+        assertEquals(List.of("Import existing TVU results","Export full technical report","Create R3 support package","Exit"),InteractiveSession.actions(pending).stream().map(a->a.label).toList());
+        assertEquals(List.of("View TVU evidence","Export full technical report","Create R3 support package","Import existing TVU results","Exit"),InteractiveSession.actions(complete).stream().map(a->a.label).toList());
     }
     @Test void eofExitsWithoutLooping()throws Exception {assertTrue(session(true,"").contains("Session complete · NOT READY TO UPGRADE"));}
     @Test void resultExplainsGroupedProblemsWithoutNestedTroubleshootingMenus()throws Exception {
@@ -40,9 +41,9 @@ class InteractiveSessionTest {
         assertTrue(session(true,"5\n1\nq\n").contains("READY TO SHARE"));
         try(var paths=Files.list(root.resolve("reports"))){assertEquals(1,paths.filter(p->p.toString().endsWith(".zip")).count());}
     }
-    @Test void runAgainProducesFreshAssessment()throws Exception {
-        assertTrue(session(true,"6\nq\n").contains("Assessment updated"));
-        try(var paths=Files.list(root.resolve("reports"))){assertTrue(paths.anyMatch(p->p.getFileName().toString().startsWith("reassessment-")));}
+    @Test void interactiveImportProducesFreshAssessment()throws Exception {
+        assertTrue(session(true,"7\n"+root.resolve("fixture/tvu.log")+"\n2\n"+root.resolve("fixture/errors.zip")+"\n1\nq\n").contains("Assessment updated"));
+        try(var paths=Files.list(root.resolve("reports"))){assertTrue(paths.anyMatch(p->p.getFileName().toString().startsWith("imported-tvu-")));}
     }
     @Test void comparisonDoesNotMergeDistinctMethodsUnderSameRule(){
         Finding a=finding("alpha"),b=finding("beta");Assessment old=new Assessment("1","0.1.0","BLOCKED","4.11","4.12",List.of(a,b),Map.of());
@@ -77,7 +78,7 @@ class InteractiveSessionTest {
     }
     @Test void importSuccessfulTvuUpdatesMenuAndExitCode()throws Exception {
         var fixture=SyntheticFixtureFactory.create(root.resolve("import"),false);var options=fixture.options(false);var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
-        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n1\n"+fixture.log()+"\n1\n1\nq\n",out)).run();
+        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("2\n"+fixture.log()+"\n1\nq\n",out)).run();
         assertEquals(0,code);assertTrue(out.toString().contains("Session complete · READY TO UPGRADE"));
     }
     private Path cloneFor(SyntheticFixtureFactory.Fixture fixture)throws IOException {
@@ -85,15 +86,17 @@ class InteractiveSessionTest {
         Files.writeString(clone.resolve("node.conf"),Files.readString(fixture.node().resolve("node.conf")).replace("synthetic.invalid/example","disposable.invalid/validation"));return clone;
     }
     @Test void cancelledExecutionWritesNoCapture()throws Exception {
-        var fixture=SyntheticFixtureFactory.create(root.resolve("cancel"),false);Path clone=cloneFor(fixture);var options=fixture.options(false);var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
-        new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n2\n"+clone+"\nNO\n1\nq\n",out)).run();
-        assertTrue(out.toString().contains("TVU execution cancelled"));try(var paths=Files.list(root.resolve("reports"))){assertFalse(paths.anyMatch(p->p.getFileName().toString().startsWith("tvu-run")));}
+        var fixture=GuidedTvuFixtureFactory.create(root.resolve("cancel"),"success",false);var options=fixture.options();var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
+        new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n3\nq\n",out)).run();
+        assertTrue(out.toString().contains("TVU cancelled. No process was started."));assertFalse(Files.exists(fixture.control().resolve("started.pid")));
+        assertFalse(Files.exists(root.resolve("reports/tvu")));
     }
-    @Test void failedApprovedTvuNeverReturnsReady()throws Exception {
-        // The synthetic TVU has no executable main: launch must fail, never fabricate success.
-        var fixture=SyntheticFixtureFactory.create(root.resolve("failed"),false);Path clone=cloneFor(fixture);var options=fixture.options(false);var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
-        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n2\n"+clone+"\nRUN TVU ON COPY\n1\nq\n",out)).run();
-        assertEquals(4,code);assertTrue(out.toString().contains("Session complete · NOT READY TO UPGRADE"));
+    @Test void invalidValidatorCannotReachApprovalOrUpgradeReady()throws Exception {
+        // A discovered synthetic TVU without an executable main must fail preparation before approval.
+        var fixture=SyntheticFixtureFactory.create(root.resolve("failed"),false);var options=fixture.options(false);var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
+        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n2\nq\n",out)).run();
+        assertEquals(1,code);assertTrue(out.toString().contains("TVU SETUP FAILURE"));assertFalse(out.toString().contains("Yes, run TVU"));assertFalse(out.toString().contains("READY TO UPGRADE"));
+        assertFalse(Files.exists(root.resolve("reports/tvu")));
     }
     @Test void mainScreenHidesInternalEnumsAndAnalyzerVersion()throws Exception {
         var f=SyntheticFixtureFactory.create(root.resolve("main"),false);var a=new AssessmentService().assess(f.options(false));String text=AssessmentInsights.header(a)+AssessmentInsights.summary(a);

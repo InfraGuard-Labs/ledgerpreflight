@@ -22,6 +22,8 @@ for name,extra,code,state in [('static',[],1,'READY FOR TVU'),('ready',['--tvu-r
 conf=pathlib.Path('/tmp/malformed.conf');conf.write_text('database { broken = [')
 a=run('unknown',[*base,'--output',out/'unknown','--node-conf',conf],4,True);assert a['status']=='UNKNOWN'
 conf=pathlib.Path('/tmp/mixed.conf');conf.write_text('database.schema="MixedCase"\ndatabase.url="jdbc:postgresql://db/example"')
+a=run('schema-blocker',[*base,'--output',out/'schema-blocker','--node-conf',conf,'--tvu-results',f/'clean/tvu.log'],2,True);assert a['status']=='BLOCKED'
+conf.write_text('database.schema=public\ndataSource.url="jdbc:postgresql://db/example?currentSchema=public,MixedCase"')
 a=run('warning',[*base,'--output',out/'warning','--node-conf',conf],1,True);assert a['status']=='WARNING'
 run('refuse-node-output',[*base,'--output',f/'clean/current-node/report'],3)
 run('syntax-error',['assess'],2)

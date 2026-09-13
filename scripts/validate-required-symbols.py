@@ -148,7 +148,7 @@ for version in VERSIONS:
     text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', raw.decode('utf-8')).replace('\r', '')
     for expected in ('NODE DISCOVERED', 'ExampleIssuer', '4.11.6', 'Platform 13', '4.12.11', 'Platform 140', '1.8.0_242', 'PostgreSQL', 'ExampleSchema', '2 current', '2 target', 'TVU          Found', '> Continue', 'CorDapp compatibility', 'NOT READY TO UPGRADE', 'WHAT HAPPENED', 'WHY IT MATTERS', 'WHAT TO DO', 'COMPATIBILITY EVIDENCE', 'Referenced by 3 source classes', 'Current runtime · Corda 4.11.6', 'Class found · Method found', 'Target runtime · Corda 4.12.11', 'Class found · Method missing', 'Technical report exported', 'READY TO SHARE', 'Session complete'):
         assert expected in text, (version, expected)
-    for forbidden in ('LP-API', 'LP-INPUT', 'LP-ANALYSIS', 'Ljava/', 'currentInventory', 'retainedSymbols', 'Compatibility analysis incomplete', 'View technical evidence', 'View full technical report', 'View TVU evidence', 'TVU instructions', 'OutOfMemoryError', 'Exception in thread', 'Transactions processed', '650 processed', '201 failed'):
+    for forbidden in ('LP-API', 'LP-INPUT', 'LP-ANALYSIS', 'Ljava/', 'currentInventory', 'retainedSymbols', 'Compatibility analysis incomplete', 'View technical evidence', 'View full technical report', 'View TVU evidence', 'OutOfMemoryError', 'Exception in thread', 'Transactions processed', '650 processed', '201 failed'):
         assert forbidden not in text, (version, forbidden)
     assert not re.search(r'\d+ warnings', text)
     page = text.split('COMPATIBILITY EVIDENCE', 1)[1].split('> Back', 1)[0]
@@ -174,8 +174,8 @@ compatible = read(ROOT / 'synthetic/required-symbols/compatible-asserted/report.
 symbol(compatible, 'COMPATIBLE')
 # This exported fixture deliberately retains ExampleSchema for the environment UI;
 # the lowercase-schema readiness cases are independently asserted in integration tests.
-assert compatible['status'] == 'WARNING'
-assert any(f['id'] == 'LP-DB-001' and f['severity'] == 'WARNING' for f in compatible['findings'])
+assert compatible['status'] == 'READY FOR TVU'
+assert not any(f['id'] == 'LP-DB-001' for f in compatible['findings'])
 assert not any(f['category'] == 'API_COMPATIBILITY' and f['severity'] in ('BLOCKED', 'UNKNOWN') for f in compatible['findings'])
 assert 'Java8 unchanged' in (ROOT / 'linux-matrix/ubuntu-18.04-java8.validation.txt').read_text()
 
@@ -200,7 +200,7 @@ for filename in ('15-required-symbol-environment.png', '16-required-symbol-resul
     assert not any(noise in content for noise in ('LP-', 'Ljava/', 'currentInventory', 'View technical evidence', 'Compatibility analysis incomplete'))
     if filename.startswith('16-'):
         assert 'CorDapp compatibility' in content and 'View compatibility evidence' in content
-        assert 'View TVU evidence' not in content and 'TVU instructions' not in content
+        assert 'View TVU evidence' not in content and 'Run TVU safely' in content
     if filename.startswith('17-'):
         assert 'example-old-contract.jar' in content and 'Class found' in content and 'Method found' in content and 'Method missing' in content
         assert 'example-new-contract.jar' not in content and 'assessment\n' not in content

@@ -32,6 +32,8 @@ a=assess('real-style-acceptance',acceptance/'current-node',kit=acceptance/'upgra
 # This metadata-only fixture intentionally omits the Contract/FlowLogic runtime APIs.
 # Discovery remains exact, but those required references must now remain UNKNOWN.
 assert a['status']=='UNKNOWN' and not a['evidence']['required-symbol-resolution']['complete']
+assert not any(f['severity']=='BLOCKED' for f in a['findings'])
+assert a['evidence']['schema-analysis']['safeSettings']['tvuSchemaReadiness']['status']=='AUTO_CONFIGURABLE'
 assert {'net/corda/core/contracts/Contract','net/corda/core/flows/FlowLogic'} <= {s['symbol']['owner'] for s in a['evidence']['required-symbol-resolution']['symbols'] if s['resolution']=='UNKNOWN'}
 d=a['evidence']['discovery'];cfg=a['evidence']['schema-analysis']['safeSettings']
 assert (a['sourceVersion'],a['targetVersion'])==('4.11.6','4.12.11')

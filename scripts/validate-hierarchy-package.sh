@@ -31,13 +31,13 @@ drive(){
   at=$(position);printf '\r'
   wait_new "$at" "$first"
   if [ "$variant" != compatible ]; then
-    at=$(position);printf '\r'
+    at=$(position);printf '%s\r' "$compatibility_keys"
     wait_new "$at" 'Target verifier'
     wait_new "$at" '> Back'
     tail -c +"$at" "$file" > "$out.compatibility.ansi"
     at=$(position);printf '\r'
     wait_new "$at" "$first"
-    at=$(position);printf 'j\r'
+    at=$(position);printf '%s\r' "$schema_keys"
     wait_new "$at" 'SCHEMA EVIDENCE'
     wait_new "$at" '> Back'
     tail -c +"$at" "$file" > "$out.schema.ansi"
@@ -45,7 +45,7 @@ drive(){
     wait_new "$at" "$first"
   fi
   if [ "$variant" = blocked-tvu ]; then
-    at=$(position);printf 'jj\r'
+    at=$(position);printf 'j\r'
     wait_new "$at" 'TVU EVIDENCE'
     wait_new "$at" '> Back'
     at=$(position);printf '\r'
@@ -76,11 +76,11 @@ for variant in blocked-no-tvu blocked-tvu compatible; do
   file=$out.ansi
   command="$app assess --node $base/node --upgrade-kit $base/kit --host-environment $base/host.json --verifier-classpath $base/classpath.txt --network-mode all-4.12 --output $out"
   if [ "$variant" = compatible ]; then
-    first='> TVU instructions';export_keys=j;support_keys=jj;expected_exit=1;expected_status='READY FOR TVU';schema=example_issuer
+    first='> Run TVU safely';export_keys=jj;support_keys=jjj;expected_exit=1;expected_status='READY FOR TVU';schema=example_issuer
   else
-    first='> View compatibility evidence';export_keys=jj;support_keys=jjj;expected_exit=2;expected_status=BLOCKED;schema=ExampleSchema
+    first='> Run TVU safely';compatibility_keys=jj;schema_keys=jjj;export_keys=jjjj;support_keys=jjjjj;expected_exit=2;expected_status=BLOCKED;schema=ExampleSchema
   fi
-  if [ "$variant" = blocked-tvu ]; then command="$command --tvu-results $base/tvu.log --tvu-results $base/errors.zip"; export_keys=jjj; support_keys=jjjj; fi
+  if [ "$variant" = blocked-tvu ]; then command="$command --tvu-results $base/tvu.log --tvu-results $base/errors.zip"; first='> View compatibility evidence'; compatibility_keys=''; schema_keys=jj; export_keys=jjj; support_keys=jjjj; fi
   rm -f "$file"
   set +e
   drive | env TERM=xterm-256color LANG=C.UTF-8 LC_ALL=C.UTF-8 timeout --preserve-status --kill-after=3s 180s script -q -e -f -c "stty cols 96 rows 56; echo \$\$ > /tmp/run-a-package/hierarchy.pid; exec $command" "$file" > /dev/null

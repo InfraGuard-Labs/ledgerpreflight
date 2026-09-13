@@ -279,7 +279,7 @@ for entry in old_manifest:
     assert sha(ROOT / 'screenshots' / entry['file']) == entry['sha256']
 unchanged = read(ROOT / 'unchanged-ux-proof.json')
 assert unchanged['baselineCommit'] == '5bd7b9549aabb696416dc8c20283cbc13d5f59c9'
-assert unchanged['environmentUnchanged'] is True and unchanged['schemaMethodUnchanged'] is True
+assert unchanged['environmentUnchanged'] is True and unchanged['legacySchemaCaseVerified'] is True
 
 lookup, symbols, integration, ux = 'ExecutionContextLookupTest', 'ExecutionContextSymbolTest', 'ExecutionContextIntegrationTest', 'ExecutionContextUxTest'
 acceptance = {}
@@ -307,7 +307,7 @@ verified('M', 'Verifier-first shadowing blocks the shim; shim-first and unproven
 verified('N', 'Unrelated broad PARTIAL never downgrades completed required context lookups', test(integration, 'broadPartialDoesNotDowngradeSuccessfulExactContexts'), '12 packaged PARTIAL plus complete required-symbol proofs')
 verified('O', 'Packaged Continue/evidence/export/support runs at actual -Xmx256m', *[relative(path) for path in sorted(matrix.glob('execution-context-*.command.txt'))])
 verified('P', 'Environment values and original source remain unchanged', test('SimpleResultActionsTest', 'environmentUsesSelectedRuntimeAndHidesHistoricalDetails'), 'unchanged-ux-proof.json', 'screenshots/19-execution-context-environment.png', '12 packaged Environment screens')
-verified('Q', 'Schema evidence wording and structure remain unchanged', test(ux, 'schemaWordingAndStructureRemainUnchangedWithContextFindings'), 'unchanged-ux-proof.json', 'screenshots/22-execution-context-schema.png')
+verified('Q', 'Existing blocked-schema wording and structure remain unchanged; automatic setup has a separate branch', test(ux, 'schemaWordingAndStructureRemainUnchangedWithContextFindings'), 'unchanged-ux-proof.json', 'screenshots/22-execution-context-schema.png')
 verified('R', 'Human context proof and verifier-only explanation expose no raw diagnostic noise', test(ux, 'allThreeProofsDescribeTheActualMissingMethod'), test(ux, 'verifierOnlyFailureDoesNotClaimTheNodeMethodIsMissing'), test(ux, 'confirmedRootPrecedesSeparateUnknownReferencesAndKeepsItsSource'), *screenshots)
 verified('S', 'HTML/JSON/text and structured exports retain exact context-specific proof', test(integration, 'exportsContainIndependentProofWithoutAbsoluteInputPaths'), test(ux, 'exportedProofKeepsExactContextsAndSourceWhileNormalOutputStaysShort'), '12 packaged report directories and three PTY export directories')
 verified('T', 'Support packages retain context proof, exclude private material, and verify final checksums', test('EvidenceTest', 'finalScannerFailsClosedAndProducesNoZip'), test('EvidenceTest', 'structuredSecretValuesRedactedWithoutBreakingJson'), *bundles)

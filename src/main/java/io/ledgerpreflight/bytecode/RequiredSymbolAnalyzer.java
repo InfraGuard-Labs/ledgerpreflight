@@ -32,7 +32,7 @@ public final class RequiredSymbolAnalyzer {
     public record Analysis(List<CompatibilityAnalyzer.CompatibilityIssue> findings,List<SymbolResult> symbols,boolean complete,List<JarInventory> currentClasses,List<JarInventory> targetClasses,List<JarInventory> verifierClasses) {
         public Analysis(List<CompatibilityAnalyzer.CompatibilityIssue> findings,List<SymbolResult> symbols,boolean complete,List<JarInventory> currentClasses,List<JarInventory> targetClasses){this(findings,symbols,complete,currentClasses,targetClasses,List.of());}
     }
-    public interface Lookup { Result lookup(String owner); default void prefetch(Collection<String> owners){} default void prefetchHierarchy(Collection<Reference> references){} }
+    public interface Lookup { Result lookup(String owner); default Result lookupClass(String owner){return lookup(owner);} default void prefetch(Collection<String> owners){} default void prefetchReferences(Collection<Reference> references){prefetch(references.stream().map(Reference::owner).distinct().toList());} default void prefetchHierarchy(Collection<Reference> references){} }
     private static final int MAX_SYMBOLS=4096,MAX_SOURCES=16384;
     private static final long MAX_SOURCE_BYTES=2L*1024*1024;
     private record Linked(Result owner,Member member,ClassInfo declaring,Set<String> alternatives,boolean incomplete,String detail,Result declaration) {
@@ -42,11 +42,13 @@ public final class RequiredSymbolAnalyzer {
         final Lookup delegate;final Map<String,Result> results=new TreeMap<>();final Set<String> local;int steps;
         Tracked(Lookup delegate,Set<String> local){this.delegate=delegate;this.local=local;}
         public void prefetch(Collection<String> owners){delegate.prefetch(owners);}
+        public void prefetchReferences(Collection<Reference> references){delegate.prefetchReferences(references);}
         public void prefetchHierarchy(Collection<Reference> references){delegate.prefetchHierarchy(references);}
         public Result lookup(String owner){if(++steps>65536)return new Result(State.INCOMPLETE,null,List.of(),"Required hierarchy resolution work limit reached");Result result=delegate.lookup(owner);results.put(owner,result);return result;}
+        public Result lookupClass(String owner){if(++steps>65536)return new Result(State.INCOMPLETE,null,List.of(),"Required hierarchy resolution work limit reached");return delegate.lookupClass(owner);}
         List<JarInventory> inventories(){Map<String,Map<String,ClassInfo>> jars=new TreeMap<>();for(var entry:results.entrySet()){var result=entry.getValue();if(!local.contains(entry.getKey())&&result.state()==State.FOUND&&result.info()!=null)for(String origin:result.origins())jars.computeIfAbsent(origin,k->new TreeMap<>()).put(result.info().name(),result.info());}return jars.entrySet().stream().map(e->new JarInventory(e.getKey(),"",Map.of(),Collections.unmodifiableMap(e.getValue()),List.of())).toList();}
     }
-    private static Lookup adapt(TargetedRuntimeLookup lookup){return new Lookup(){public Result lookup(String owner){return lookup.lookup(owner);}public void prefetch(Collection<String> owners){lookup.prefetch(owners);}public void prefetchHierarchy(Collection<Reference> references){lookup.prefetchHierarchy(references);}};}
+    private static Lookup adapt(TargetedRuntimeLookup lookup){return new Lookup(){public Result lookup(String owner){return lookup.lookup(owner);}public Result lookupClass(String owner){return lookup.lookupClass(owner);}public void prefetch(Collection<String> owners){lookup.prefetch(owners);}public void prefetchReferences(Collection<Reference> references){lookup.prefetchReferences(references);}public void prefetchHierarchy(Collection<Reference> references){lookup.prefetchHierarchy(references);}};}
     public Analysis analyze(List<JarInventory> consumers,TargetedRuntimeLookup current,TargetedRuntimeLookup target){return analyze(consumers,adapt(current),adapt(target));}
     public Analysis analyze(List<JarInventory> consumers,TargetedRuntimeLookup current,TargetedRuntimeLookup target,TargetedRuntimeLookup verifier){return analyze(consumers,adapt(current),adapt(target),verifier==null?null:adapt(verifier));}
     public Analysis analyze(List<JarInventory> consumers,TargetedRuntimeLookup current,TargetedRuntimeLookup target,TargetedRuntimeLookup verifier,Predicate<Source> verifierApplies){return analyze(consumers,adapt(current),adapt(target),verifier==null?null:adapt(verifier),verifierApplies);}
@@ -111,10 +113,10 @@ public final class RequiredSymbolAnalyzer {
     private static void prepareHierarchy(Lookup lookup,Collection<Symbol> symbols){
         Set<HierarchyQuestion> pending=new LinkedHashSet<>(),visited=new HashSet<>();for(Symbol symbol:symbols)pending.add(new HierarchyQuestion(symbol.owner(),symbol));
         for(int depth=0;depth<=128&&!pending.isEmpty();depth++){
-            lookup.prefetchHierarchy(pending.stream().map(q->new Reference("",q.symbol().kind(),q.owner(),q.symbol().member(),q.symbol().descriptor(),q.symbol().opcode(),q.symbol().ownerInterface())).distinct().toList());
-            lookup.prefetch(pending.stream().map(HierarchyQuestion::owner).distinct().sorted().toList());Set<HierarchyQuestion> next=new LinkedHashSet<>();
+            List<Reference> questions=pending.stream().map(q->new Reference("",q.symbol().kind(),q.owner(),q.symbol().member(),q.symbol().descriptor(),q.symbol().opcode(),q.symbol().ownerInterface())).distinct().toList();
+            lookup.prefetchReferences(questions);lookup.prefetchHierarchy(questions.stream().filter(ref->!ref.kind().equals("CLASS")).toList());Set<HierarchyQuestion> next=new LinkedHashSet<>();
             for(HierarchyQuestion question:pending){
-                if(visited.size()>=32768)return;if(!visited.add(question))continue;Result result=lookup.lookup(question.owner());Symbol symbol=question.symbol();
+                if(visited.size()>=32768)return;if(!visited.add(question))continue;Symbol symbol=question.symbol();Result result=symbol.kind().equals("CLASS")?lookup.lookupClass(question.owner()):lookup.lookup(question.owner());
                 if(result.state()!=State.FOUND||symbol.kind().equals("CLASS"))continue;ClassInfo info=result.info();Reference ref=symbol.reference();
                 if(info.members().stream().anyMatch(m->m.kind().equals(ref.kind())&&m.name().equals(ref.name())&&m.descriptor().equals(ref.descriptor())))continue;
                 if(ref.name().equals("<init>")||ref.name().equals("<clinit>")||ref.kind().equals("METHOD")&&ref.isStatic()&&(info.access()&Opcodes.ACC_INTERFACE)!=0)continue;
@@ -124,7 +126,7 @@ public final class RequiredSymbolAnalyzer {
             pending=next;
         }
     }
-    private static Lookup withLocal(Lookup runtime,Map<String,List<Result>> local){return new Lookup(){public Result lookup(String owner){List<Result> found=local.get(owner);return found==null?runtime.lookup(owner):found.size()==1?found.get(0):new Result(State.AMBIGUOUS,null,found.stream().flatMap(r->r.origins().stream()).sorted().toList(),"Active current CorDapps contain multiple definitions");}public void prefetch(Collection<String> owners){runtime.prefetch(owners.stream().filter(o->!local.containsKey(o)).toList());}public void prefetchHierarchy(Collection<Reference> references){runtime.prefetchHierarchy(references.stream().filter(ref->!local.containsKey(ref.owner())).toList());}};}
+    private static Lookup withLocal(Lookup runtime,Map<String,List<Result>> local){return new Lookup(){public Result lookup(String owner){List<Result> found=local.get(owner);return found==null?runtime.lookup(owner):found.size()==1?found.get(0):new Result(State.AMBIGUOUS,null,found.stream().flatMap(r->r.origins().stream()).sorted().toList(),"Active current CorDapps contain multiple definitions");}public Result lookupClass(String owner){return local.containsKey(owner)?lookup(owner):runtime.lookupClass(owner);}public void prefetch(Collection<String> owners){runtime.prefetch(owners.stream().filter(o->!local.containsKey(o)).toList());}public void prefetchReferences(Collection<Reference> references){runtime.prefetchReferences(references.stream().filter(ref->!local.containsKey(ref.owner())).toList());}public void prefetchHierarchy(Collection<Reference> references){runtime.prefetchHierarchy(references.stream().filter(ref->!local.containsKey(ref.owner())).toList());}};}
     private static boolean declaredLocally(Map<String,List<Result>> local,String owner,Reference ref,Set<String> visited){
         if(visited.size()>128||!visited.add(owner))return false;List<Result> definitions=local.get(owner);if(definitions==null||definitions.size()!=1)return false;ClassInfo cls=definitions.get(0).info();
         if(cls.members().stream().anyMatch(m->m.kind().equals(ref.kind())&&m.name().equals(ref.name())&&m.descriptor().equals(ref.descriptor())&&m.isStatic()==ref.isStatic()))return true;
@@ -132,7 +134,7 @@ public final class RequiredSymbolAnalyzer {
         if(cls.superName()!=null&&declaredLocally(local,cls.superName(),ref,visited))return true;return cls.interfaces().stream().anyMatch(i->declaredLocally(local,i,ref,new HashSet<>(visited)));
     }
     private static Linked resolve(Lookup lookup,Symbol symbol){
-        Result owner=lookup.lookup(symbol.owner());
+        Result owner=symbol.kind().equals("CLASS")?lookup.lookupClass(symbol.owner()):lookup.lookup(symbol.owner());
         if(owner.state()!=State.FOUND)return new Linked(owner,null,null,Set.of(),owner.state()!=State.ABSENT,owner.detail());
         if(symbol.kind().equals("CLASS"))return new Linked(owner,null,owner.info(),Set.of(),false,"");
         Linked member=resolveMember(lookup,owner.info(),symbol.reference(),new HashSet<>(),0);

@@ -31,13 +31,13 @@ drive(){
   at=$(position);printf '\r'
   wait_new "$at" "$first"
   if [ "$variant" != compatible ]; then
-    at=$(position);printf '\r'
+    at=$(position);printf '%s\r' "$compatibility_keys"
     wait_new "$at" 'Target verifier'
     wait_new "$at" '> Back'
     tail -c +"$at" "$file" > "$out.compatibility.ansi"
     at=$(position);printf '\r'
     wait_new "$at" "$first"
-    at=$(position);printf 'j\r'
+    at=$(position);printf '%s\r' "$schema_keys"
     wait_new "$at" 'SCHEMA EVIDENCE'
     wait_new "$at" '> Back'
     tail -c +"$at" "$file" > "$out.schema.ansi"
@@ -69,9 +69,9 @@ for variant in blocked verifier-only compatible; do
   file=$out.ansi
   command="$app assess --node $base/node --upgrade-kit $base/kit --host-environment $base/host.json --verifier-classpath $base/classpath.txt --network-mode all-4.12 --output $out"
   if [ "$variant" = compatible ]; then
-    first='> TVU instructions';export_keys=j;support_keys=jj;expected_exit=1;expected_status='READY FOR TVU';schema=example_issuer
+    first='> Run TVU safely';export_keys=jj;support_keys=jjj;expected_exit=1;expected_status='READY FOR TVU';schema=example_issuer
   else
-    first='> View compatibility evidence';export_keys=jj;support_keys=jjj;expected_exit=2;expected_status=BLOCKED;schema=ExampleSchema
+    first='> Run TVU safely';compatibility_keys=jj;schema_keys=jjj;export_keys=jjjj;support_keys=jjjjj;expected_exit=2;expected_status=BLOCKED;schema=ExampleSchema
   fi
   rm -f "$file"
   set +e

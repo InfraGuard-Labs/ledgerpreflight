@@ -22,9 +22,9 @@ for version in ('18.04','20.04','22.04','24.04'):
     assert {x['path'] for x in selection['inactiveRuntimes']}=={'corda.jar-old','corda.jar-older'}
     assert coverage['status']=='COMPLETE_WITHIN_LIMITS'
     assert not any('corda.jar-old' in x['path'] or 'unreferenced-driver' in x['path'] for x in coverage['currentInventory'])
-    assert a['status']=='BLOCKED' and {'LP-API-001','LP-LEGACY-001','LP-INTERNAL-001','LP-DB-001'}<={f['id'] for f in a['findings']}
+    assert a['status']=='BLOCKED' and {'LP-API-001','LP-LEGACY-001','LP-INTERNAL-001'}<={f['id'] for f in a['findings']}
     raw=(base/f'active-runtime-{version}.ansi').read_bytes()
-    assert all(x in raw for x in (b'> Continue',b'> View compatibility evidence',b'Export full technical report',b'Session complete',b'4.11.6',b'Platform 13'))
+    assert all(x in raw for x in (b'> Continue',b'> Run TVU safely',b'Export full technical report',b'Session complete',b'4.11.6',b'Platform 13'))
     assert not any(x in raw for x in (b'View technical evidence',b'View full technical report',b'corda.jar-old',b'currentInventory',b'LP-API',b'OutOfMemoryError'))
     assert not re.search(rb'\d+ warnings',raw)
     assert raw.rfind(b'\x1b[?25h')>raw.rfind(b'\x1b[?25l')
@@ -47,11 +47,11 @@ results={'acceptance':{label:{'result':'PASS','behavior':description} for label,
 ('A','Canonical strongly identified corda.jar wins over valid historical siblings'),
 ('B','Single versioned or renamed runtime selected by contents; five filenames'),
 ('C','Single custom-runtime.jar selected'),
-('D','Ambiguous candidates remain unselected without input; interactive choice survives Continue and Run again'),
+('D','Ambiguous candidates remain unselected without input; interactive choice survives Continue and evidence navigation'),
 ('E','Invalid canonical filename does not outrank strongly identified alternative'),
 ('F','Version, platform, minimum Java and vendor propagate consistently'))},
 'suites':suites,'ubuntu':ubuntu,
-'dynamicScenarios':{'compatibilitySchemaTvu':'PASS: seven requested actions','compatibilityOnly':'PASS: five relevant actions','readyForTvu':'PASS: instructions without invented evidence','readyToUpgrade':'PASS: supplied TVU evidence'},
+'dynamicScenarios':{'compatibilitySchemaTvu':'PASS: contextual evidence, guided rerun, import, export/support and exit','compatibilityOnly':'PASS: relevant evidence, guided execution, import and artifact actions','readyForTvu':'PASS: guided execution and import without invented evidence','readyToUpgrade':'PASS: supplied TVU evidence and contextual actions'},
 'normalOutput':'PASS: no generic dashboard, raw warning totals or diagnostic data',
 'evidence':'PASS: human compatibility/schema/TVU pages; complete diagnostics exported',
 'driverScope':'PASS: unreferenced driver excluded; referenced and explicit target-app driver linkage retained'}

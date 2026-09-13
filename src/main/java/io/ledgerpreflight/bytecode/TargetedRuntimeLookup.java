@@ -39,10 +39,13 @@ public final class TargetedRuntimeLookup {
     private record Candidate(int version,ZipEntry entry) {}
     private static final class BudgetExceeded extends IOException {BudgetExceeded(String message){super(message);}}
     private static final class SignatureExceeded extends RuntimeException {SignatureExceeded(String message){super(message);}}
-    private record Definition(ClassInfo info,String origin,String component) {}
+    private record Definition(ClassInfo info,String origin,String component,String classHash) {}
     private static final class Pending {
+        final boolean classOnly;final Pending presence;
         final List<Definition> definitions=new ArrayList<>();String failure;
-        void found(ClassInfo value,String origin,String component){if(definitions.size()<32)definitions.add(new Definition(value,origin,component));else failure="Required duplicate-definition retention limit reached";}
+        Pending(){this(false,false);}
+        Pending(boolean classOnly,boolean classRequested){this.classOnly=classOnly;presence=!classOnly&&classRequested?new Pending(true,false):null;}
+        void found(ClassInfo value,String origin,String component,String classHash){if(definitions.size()<32)definitions.add(new Definition(value,origin,component,classHash));else failure="Required duplicate-definition retention limit reached";}
     }
     private final List<Artifact> artifacts;
     private final Limits limits;
@@ -55,6 +58,8 @@ public final class TargetedRuntimeLookup {
     private boolean contextInspected;
     private String contextFailure;
     private final Map<String,Result> cache=new TreeMap<>();
+    private final Map<String,Result> classCache=new TreeMap<>();
+    private final Set<String> retainedOwners=new HashSet<>();
     private final Map<Path,Stamp> stamps=new HashMap<>();
     private final Set<Path> verified=new HashSet<>();
     private final Set<String> nestedComponents=new HashSet<>();
@@ -108,13 +113,13 @@ public final class TargetedRuntimeLookup {
         return components.entrySet().stream().map(e->new Component(e.getKey(),e.getValue())).toList();
     }
     public void setProvenClasspathOrder(List<String> order){
-        if(!cache.isEmpty())throw new IllegalStateException("Classpath proof must be bound before required owners are resolved");
+        if(!cache.isEmpty()||!classCache.isEmpty())throw new IllegalStateException("Classpath proof must be bound before required owners are resolved");
         if(order.size()>256||order.stream().anyMatch(s->s==null||s.length()>2048))throw new IllegalArgumentException("Required classpath proof limit reached");
         provenClasspathOrder=List.copyOf(order);
     }
     /** Sources are exact bound context component labels; an empty label retains unresolved evidence. */
     public void setSelectedClassSources(Map<String,String> sources){
-        if(!cache.isEmpty())throw new IllegalStateException("Class-load proof must be bound before required owners are resolved");
+        if(!cache.isEmpty()||!classCache.isEmpty())throw new IllegalStateException("Class-load proof must be bound before required owners are resolved");
         if(sources.size()>limits.maxOwners()||sources.entrySet().stream().anyMatch(e->!validOwner(e.getKey())||e.getValue()==null||e.getValue().length()>2048)||sources.entrySet().stream().mapToLong(e->2L*(e.getKey().length()+e.getValue().length())+128).sum()>limits.maxSignatureBytes())throw new IllegalArgumentException("Required class-load proof limit reached");
         selectedClassSources=Map.copyOf(sources);
     }
@@ -125,6 +130,20 @@ public final class TargetedRuntimeLookup {
         try{verifySnapshots();}catch(IOException e){invalidated=e.getMessage();return incomplete(invalidated);}
         if(!cache.containsKey(owner))prefetch(List.of(owner));
         return cache.getOrDefault(owner,incomplete("Required owner cache limit reached"));
+    }
+    /** Class existence is a separate proof and never supplies member or hierarchy definitions. */
+    public Result lookupClass(String owner){
+        if(!validOwner(owner))return incomplete("Invalid required owner name");
+        if(invalidated!=null)return incomplete(invalidated);
+        try{verifySnapshots();}catch(IOException e){invalidated=e.getMessage();return incomplete(invalidated);}
+        if(!classCache.containsKey(owner))prefetchReferences(List.of(new Reference("","CLASS",owner,"","",0,null)));
+        return classCache.getOrDefault(owner,incomplete("Required owner cache limit reached"));
+    }
+    /** A mixed batch reads each selected capsule once for its required class/member questions. */
+    public void prefetchReferences(Collection<Reference> references){
+        Set<String> classes=new TreeSet<>(),members=new TreeSet<>();
+        for(Reference ref:references){if(ref.kind().equals("CLASS"))classes.add(ref.owner());else members.add(ref.owner());}
+        Set<String> owners=new TreeSet<>(members);owners.addAll(classes);prefetch(owners,classes,members);
     }
 
     /** Discover needed ancestors locally, then verify every new owner against the whole context. */
@@ -163,14 +182,18 @@ public final class TargetedRuntimeLookup {
 
     /** Batch required owners before resolving ancestors, so a capsule is streamed once per batch. */
     public void prefetch(Collection<String> owners){
+        prefetch(owners,Set.of(),new HashSet<>(owners));
+    }
+    private void prefetch(Collection<String> owners,Set<String> classes,Set<String> members){
         if(invalidated!=null)return;
         if(started==0)started=System.nanoTime();
         Map<String,Pending> pending=new TreeMap<>();
         for(String owner:owners){
             if(!validOwner(owner))continue;
-            if(cache.containsKey(owner)||pending.containsKey(owner))continue;
-            if(cache.size()+pending.size()>=limits.maxOwners())break;
-            pending.put(owner,new Pending());
+            boolean memberNeeded=members.contains(owner)&&!cache.containsKey(owner),classNeeded=classes.contains(owner)&&!classCache.containsKey(owner);
+            if(!memberNeeded&&!classNeeded||pending.containsKey(owner))continue;
+            if(!retainedOwners.contains(owner)&&retainedOwners.size()>=limits.maxOwners())break;
+            retainedOwners.add(owner);pending.put(owner,new Pending(!memberNeeded,classNeeded));
         }
         if(pending.isEmpty())return;
         List<Artifact> primary=scope==Scope.ALL?artifacts:artifacts.stream().filter(a->scope==Scope.NODE_RUNTIME?a.role()==Role.RUNTIME:a.role()==Role.RUNTIME||a.role()==Role.VERIFIER||a.role()==Role.LEGACY).toList();
@@ -178,15 +201,24 @@ public final class TargetedRuntimeLookup {
         Map<String,Pending> fallback=new TreeMap<>();
         for(var item:pending.entrySet()){
             Result result=select(item.getKey(),item.getValue(),failure,false);
-            if(scope!=Scope.ALL&&result.state()==State.ABSENT)fallback.put(item.getKey(),new Pending());
-            cache.put(item.getKey(),result);
+            if(scope!=Scope.ALL&&result.state()==State.ABSENT)fallback.put(item.getKey(),new Pending(item.getValue().classOnly,item.getValue().presence!=null));
+            remember(item.getKey(),item.getValue(),failure,false,result);
         }
         List<Artifact> supporting=artifacts.stream().filter(a->a.role()==Role.SUPPORTING).toList();
         if(!fallback.isEmpty()&&!supporting.isEmpty()){
             failure=scan(supporting,fallback,true);
-            for(var item:fallback.entrySet())cache.put(item.getKey(),select(item.getKey(),item.getValue(),failure,true));
+            for(var item:fallback.entrySet())remember(item.getKey(),item.getValue(),failure,true,select(item.getKey(),item.getValue(),failure,true));
         }
-        for(String owner:pending.keySet())if(cache.get(owner).state()==State.ABSENT&&selectedClassSources.containsKey(owner))cache.put(owner,incomplete("Supplied class-load source could not be confirmed in this execution context"));
+        for(String owner:pending.keySet())if(selectedClassSources.containsKey(owner)){
+            if(cache.containsKey(owner)&&cache.get(owner).state()==State.ABSENT)cache.put(owner,incomplete("Supplied class-load source could not be confirmed in this execution context"));
+            if(classCache.containsKey(owner)&&classCache.get(owner).state()==State.ABSENT)classCache.put(owner,incomplete("Supplied class-load source could not be confirmed in this execution context"));
+        }
+    }
+    private void remember(String owner,Pending value,String failure,boolean fallback,Result result){
+        if(value.classOnly){classCache.put(owner,result);return;}
+        cache.put(owner,result);
+        if(value.presence!=null)classCache.put(owner,select(owner,value.presence,failure,fallback));
+        else if(result.state()==State.FOUND||result.state()==State.ABSENT)classCache.putIfAbsent(owner,result);
     }
 
     private String scan(List<Artifact> selected,Map<String,Pending> pending,boolean fallback){
@@ -234,6 +266,7 @@ public final class TargetedRuntimeLookup {
             if(candidates.size()!=1)return new Result(State.INCOMPLETE,null,origins,"Supplied class-load source does not uniquely identify a definition in this execution context");
             loaded=candidates.get(0);
         }
+        boolean equivalentUnordered=false;
         if(value.definitions.size()>1){
             int minimum=Integer.MAX_VALUE;Set<Integer> ranks=new HashSet<>();boolean ordered=true;
             for(Definition definition:value.definitions){
@@ -241,7 +274,8 @@ public final class TargetedRuntimeLookup {
                 if(rank<0||!ranks.add(rank))ordered=false;
                 if(rank>=0&&rank<minimum){minimum=rank;winner=definition;}
             }
-            if(!ordered&&loaded==null)return new Result(State.AMBIGUOUS,null,origins,"Multiple components define this owner in the same execution context; class selection is unproven");
+            equivalentUnordered=!ordered&&loaded==null&&value.classOnly&&!winner.classHash().isEmpty()&&value.definitions.stream().allMatch(d->d.classHash().equals(value.definitions.get(0).classHash()));
+            if(!ordered&&loaded==null&&!equivalentUnordered)return new Result(State.AMBIGUOUS,null,origins,"Multiple components define this owner in the same execution context; class selection is unproven");
             if(ordered&&loaded!=null&&!loaded.equals(winner))return new Result(State.INCOMPLETE,null,origins,"Supplied class-load source contradicts the supplied classpath order in this execution context");
             if(loaded!=null){winner=loaded;proof="Supplied class-load evidence identifies this exact component in the selected execution context";}
             else proof="Exact supplied classpath order selects this component before every other definition in the same execution context";
@@ -251,6 +285,7 @@ public final class TargetedRuntimeLookup {
             if(winningRank<0||declaringRank<0||winningRank>=declaringRank)return new Result(State.INCOMPLETE,null,origins,"An unresolved declared classpath dependency could precede the candidate owner in this execution context");
         }
         if(loaded==null&&unresolvedDeclaringComponents.contains(winner.component()))proof="Owner is defined in the declaring component before its unresolved manifest Class-Path dependencies";
+        if(equivalentUnordered){String equivalent="SHA-256 identical definitions establish class-only presence in this execution context; member selection remains unproven";return new Result(State.FOUND,winner.info(),origins,equivalent,"",List.of(),equivalent);}
         String winning=winner.origin();List<String> shadowed=origins.stream().filter(s->!s.equals(winning)).toList();
         return new Result(State.FOUND,winner.info(),List.of(winning),proof,winning,shadowed,proof);
     }
@@ -314,7 +349,7 @@ public final class TargetedRuntimeLookup {
             names.clear();
             HierarchyHints localHierarchy=new HierarchyHints();
             try{for(var item:candidates.entrySet()){
-                Pending value=pending.get(item.getKey());ZipEntry entry=item.getValue().entry();
+                Pending value=pending.get(item.getKey());ZipEntry entry=item.getValue().entry();boolean presenceInspected=false;
                 try{
                     String origin=label+"!/"+entry.getName();
                     if(hierarchySelections!=null){
@@ -323,11 +358,19 @@ public final class TargetedRuntimeLookup {
                     }
                     checkExpandedEntry(entry,limits.maxClassBytes());byte[] bytes;
                     try(InputStream in=zip.getInputStream(entry)){bytes=read(in,entry,limits.maxClassBytes());}
-                    ClassInfo info=parse(bytes,item.getKey());reserve(128,origin);
-                    value.found(info,origin,label);
+                    String classHash="";
+                    if(value.classOnly||value.presence!=null){
+                        classHash=classHash(bytes);ClassInfo presence=parse(bytes,item.getKey(),true);reserve(128,origin,classHash);
+                        (value.classOnly?value:value.presence).found(presence,origin,label,classHash);
+                        presenceInspected=true;
+                    }
+                    if(!value.classOnly){long retainedBefore=signatureBytes;
+                        try{ClassInfo info=parse(bytes,item.getKey());reserve(128,origin);value.found(info,origin,label,classHash);}
+                        catch(IOException|RuntimeException|StackOverflowError e){signatureBytes=retainedBefore;throw e;}
+                    }
                 }catch(BudgetExceeded e){throw e;}
-                catch(IOException|RuntimeException e){value.failure="Required class could not be inspected: "+Objects.toString(e.getMessage(),"Malformed class");}
-                catch(StackOverflowError e){value.failure="Required class nesting exceeded parser stack capacity";}
+                catch(IOException|RuntimeException e){value.failure="Required class could not be inspected: "+Objects.toString(e.getMessage(),"Malformed class");if(value.presence!=null&&!presenceInspected)value.presence.failure=value.failure;}
+                catch(StackOverflowError e){value.failure="Required class nesting exceeded parser stack capacity";if(value.presence!=null&&!presenceInspected)value.presence.failure=value.failure;}
             }}finally{hierarchyHintBytes-=localHierarchy.bytes;localHierarchy.signatures.clear();}
             // A first hit is insufficient: later components may define the same class.
             for(var enumeration=zip.entries();enumeration.hasMoreElements();){
@@ -432,10 +475,19 @@ public final class TargetedRuntimeLookup {
         }
     }
     private ClassInfo parse(byte[] bytes,String owner)throws IOException {
+        return parse(bytes,owner,false);
+    }
+    private ClassInfo parse(byte[] bytes,String owner,boolean classOnly)throws IOException {
+        if(bytes.length<10||(bytes[0]&255)!=0xca||(bytes[1]&255)!=0xfe||(bytes[2]&255)!=0xba||(bytes[3]&255)!=0xbe)throw new IOException("Required entry is not a valid class file");
         ClassReader reader=new ClassReader(bytes);if(!owner.equals(reader.getClassName()))throw new IOException("Required class name differs from archive path");
         int major=reader.readUnsignedShort(6),minor=reader.readUnsignedShort(4);
         if(major<45||major>limits.javaFeature()+44||minor!=0&&(major!=45||minor>3))
             throw new IOException("Required class bytecode is unsupported by the selected runtime Java version");
+        if(classOnly){
+            reader.accept(new ClassVisitor(Opcodes.ASM9){},ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);
+            reserve(160,reader.getClassName());
+            return new ClassInfo(reader.getClassName(),null,List.of(),reader.getAccess(),major,List.of(),List.of());
+        }
         List<Member> members=new ArrayList<>();String[] faces=reader.getInterfaces();
         reserve(160,reader.getClassName(),reader.getSuperName());for(String face:faces)reserve(64,face);
         reader.accept(new ClassVisitor(Opcodes.ASM9){
@@ -449,6 +501,7 @@ public final class TargetedRuntimeLookup {
         members.sort(Comparator.comparing(Member::kind).thenComparing(Member::name).thenComparing(Member::descriptor));
         return new ClassInfo(reader.getClassName(),reader.getSuperName(),List.of(faces),reader.getAccess(),reader.readUnsignedShort(6),List.copyOf(members),List.of());
     }
+    private static String classHash(byte[] bytes){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}catch(NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}}
     private void reserve(int base,String...strings){
         long amount=base;for(String value:strings)if(value!=null){if(value.length()>2048)throw new SignatureExceeded("Required symbol text size limit reached");amount+=48L+2L*value.length();}
         if(signatureBytes+hierarchyHintBytes+amount>limits.maxSignatureBytes())throw new SignatureExceeded("Required compact symbol cache size limit reached");signatureBytes+=amount;

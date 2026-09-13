@@ -14,8 +14,8 @@ class StateAwareUxTest {
     @Test void readyMenusContainOnlyRelevantActions(){
         var pending=new Assessment("1","0.1.0","READY FOR TVU","4.11","4.12",List.of(),Map.of());
         var ready=new Assessment("1","0.1.0","READY TO UPGRADE","4.11","4.12",List.of(),Map.of("tvu-evidence-supplied",true));
-        assertEquals(List.of("TVU instructions","Export full technical report","Create R3 support package","Run again","Exit"),InteractiveSession.actions(pending).stream().map(a->a.label).toList());
-        assertEquals(List.of("View TVU evidence","Export full technical report","Create R3 support package","Run again","Exit"),InteractiveSession.actions(ready).stream().map(a->a.label).toList());
+        assertEquals(List.of("Import existing TVU results","Export full technical report","Create R3 support package","Exit"),InteractiveSession.actions(pending).stream().map(a->a.label).toList());
+        assertEquals(List.of("View TVU evidence","Export full technical report","Create R3 support package","Import existing TVU results","Exit"),InteractiveSession.actions(ready).stream().map(a->a.label).toList());
     }
     @Test void zeroBlockerWarningMenuDoesNotOfferBlockers()throws Exception {
         var f=SyntheticFixtureFactory.create(root.resolve("fixture"),false);
@@ -26,7 +26,7 @@ class StateAwareUxTest {
     }
     @Test void groupedCountsDoNotPretendMissingDetailsWereSupplied()throws Exception {
         var f=SyntheticFixtureFactory.create(root.resolve("fixture"),true);var a=new AssessmentService().assess(f.options(true));String text=ProductView.result(a);
-        assertTrue(text.contains("2 issues need attention"));assertTrue(text.contains("3 supplied failure details"));
+        assertTrue(text.contains("3 blockers"));assertTrue(text.contains("3 supplied failure details"));
         assertFalse(text.contains("201 supplied failures match"));
     }
     @Test void evidenceRequiresExplicitSelection()throws Exception {

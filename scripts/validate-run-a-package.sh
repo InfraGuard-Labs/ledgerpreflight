@@ -26,7 +26,7 @@ rm -f "$file"
 hide=$(printf '\033[?25l');show=$(printf '\033[?25h')
 wait_text(){ count=0; until grep -qF "$2" "$1" 2>/dev/null; do count=$((count+1));test "$count" -lt 900 || return 1;sleep 0.1;done; }
 set +e
-(wait_text "$file" "$hide";tr '\000' '\n' </proc/"$(cat /tmp/run-a-package/pid)"/cmdline > "/output/$variant-$VERSION_ID.command.txt";printf '\r';wait_text "$file" '> View compatibility evidence';printf q;sleep 1) |
+(wait_text "$file" "$hide";tr '\000' '\n' </proc/"$(cat /tmp/run-a-package/pid)"/cmdline > "/output/$variant-$VERSION_ID.command.txt";printf '\r';wait_text "$file" '> Run TVU safely';printf q;sleep 1) |
  env TERM=xterm-256color LANG=C.UTF-8 LC_ALL=C.UTF-8 timeout --preserve-status --kill-after=3s 120s script -q -e -f -c "echo \$\$ > /tmp/run-a-package/pid; exec $command" "$file" >/dev/null
 code=$?
 set -e

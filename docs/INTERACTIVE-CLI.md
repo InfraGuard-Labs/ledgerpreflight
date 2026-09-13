@@ -1,25 +1,40 @@
 # Interactive CLI
 
-The normal flow is Environment, Result, then relevant evidence or export actions. Discovery happens before deep compatibility analysis. The environment screen shows the chosen node, active current runtime, target runtime, current Java evidence, database, schema and CorDapp counts. Its only actions are Continue and Exit. Ambiguous node/configuration/current-runtime/target-runtime/TVU choices are resolved explicitly first.
+The normal flow is Environment, Result, then the actions relevant to that assessment. Discovery precedes deep compatibility analysis. The environment screen shows the node, active current runtime, target runtime, current Java evidence, database, schema and CorDapp counts. Continue and Exit remain its only actions. Ambiguous node, configuration, runtime and TVU choices require selection first.
 
-A strongly identified root corda.jar is the active current runtime even when historical runtime copies are present. With no valid canonical runtime, one strong root candidate is selected regardless of name; multiple equally strong candidates require selection. Historical runtimes stay in exported diagnostics and are excluded from normal deep analysis. Active version, platform, minimum Java and vendor feed the same normalized model used by discovery and assessment.
+A strongly identified root corda.jar is the active current runtime even when historical copies exist. Without a canonical runtime, one strong root candidate is selected regardless of name; multiple equally strong candidates require selection. Historical copies stay in exported diagnostics and are excluded from normal deep analysis.
 
-Result actions depend on the actual findings:
+The result counts grouped confirmed blockers and shows every counted heading. Unresolved questions and required reviews remain separate. Each issue explains What happened, Why it matters and What to do. Deep evidence, inventories, hashes, descriptors and raw logs remain outside the normal screen.
 
-| Condition | Action |
-| --- | --- |
-| CorDapp/API compatibility issue | View compatibility evidence |
-| Schema issue or warning | View schema evidence |
-| Supplied TVU results | View TVU evidence |
-| READY FOR TVU | TVU instructions |
-| All results | Export full technical report; Create R3 support package; Run again; Exit |
+Before TVU results are supplied, the result offers Run TVU safely when a target validator is discovered, then Import existing TVU results, relevant compatibility/schema evidence, Export full technical report, Create R3 support package and Exit. After a run or import, relevant evidence comes first, followed by export, support, Run TVU again, import and Exit. The user stays in the same session through preparation, execution, evidence collection and reassessment.
 
-The three evidence views are short explanations of affected code, effective schemas and supplied TVU totals/root causes. Compatibility evidence names only proven source CorDapps and shows the referenced API alongside independent current/target class and member outcomes. Repeated callers share one API root cause. An unrelated broad runtime indexing limit remains in exports; incomplete required lookup is shown as unresolved compatibility. They do not show raw JSON, internal finding IDs, budgets, hashes or stack-trace dumps. There is no general technical-evidence dashboard or interactive raw-report browser. Repeated internal diagnostics map to user-facing issue groups; the result does not display a raw warning total.
+Compatibility evidence shows the affected source CorDapp, human API name and independent current/target class and member outcomes. Repeated callers share one API root cause. Correlation uses exact member signatures only when supplied transaction records establish the match; missing details remain unclassified. Schema and TVU evidence retain concise explanations with technical depth available in the exports.
 
-Confirmed blockers, unresolved coverage and required reviews all prevent an upgrade recommendation. JSON preserves BLOCKED, UNKNOWN and WARNING separately, with their existing exit codes. The normal screen explains grouped issues using What happened, Why it matters and What to do. TVU failures are correlated to exact member signatures only when the supplied records support that match; missing details remain unclassified.
+## Guided TVU safety
 
-Export full technical report writes complete HTML, JSON and plain text and shows their paths. Raw runtime manifests, active/inactive candidates, inventories, exact API references, classpath order, schema/search-path declarations, TVU totals, coverage limits and skipped paths remain in exported diagnostics. Sanitized support packages contain generated textual evidence only, exclude binaries/keys/keystores, undergo a final ZIP secret scan and receive an external SHA-256 checksum.
+Static assessment reads local inputs. It never connects to a database, starts TVU, modifies the node or runs migrations. Choosing Run TVU safely first shows the target, validator, target CorDapps, database target, schema preparation, environment and exact command. Execution requires explicit confirmation that the selected database is an isolated/non-production copy. Database names such as test or copy do not establish safety.
 
-TVU instructions preserve isolated-copy preparation, importing an existing complete run and explicitly approved execution on an isolated node/database copy. The command and environment are shown before approval. Static assessment never executes TVU, changes the node, runs SQL or performs migrations.
+Use a different safe node configuration accepts a configuration file for that copy. LedgerPreflight validates the database vendor, schema and available identity/role relationship. Credentials stay in the file, never in command arguments. No database cloning, cloud operation or migration is automated.
 
-Selection uses ASCII >. Interactive menus hide the native cursor and restore it in a finally block and shutdown hook. Arrow keys, j/k, Enter and q are supported. Plain-terminal mode uses numbered labels; CI, JSON and redirected output remain deterministic and noninteractive. Abrupt power loss or SIGKILL cannot execute cleanup; standard exit, q, Ctrl+C, SIGTERM and exceptions are covered by terminal validation.
+For CI, use the explicit flags together:
+
+```sh
+ledger-preflight assess --node /path/to/node --upgrade-kit /path/to/kit \
+  --run-tvu --tvu-node-conf /path/to/isolated/node.conf --confirm-isolated-db
+```
+
+The guided runner prepares its own private workspace, copies selected target artifacts and uses its compatible Java runtime. Affected mixed-case PostgreSQL schemas on supported Corda 4.12 targets receive temporary Hibernate configuration. An established primary schema wins over additional search schemas. An ambiguous primary requires selection from discovered candidates; noninteractive execution requires an explicit valid selection with --tvu-schema. Inputs remain unchanged.
+
+Run progress shows observed counts and elapsed time. Repetitive verifier messages are captured rather than printed. Cancel, Ctrl+C and SIGTERM stop the validator and verifier process group, preserve sanitized partial evidence and clean the private workspace. SIGKILL or power loss cannot execute cleanup.
+
+A completed run is automatically imported, correlated and reassessed. Setup, database connection, execution, transaction verification and cancellation outcomes remain distinct. Successful counters cannot establish readiness when execution, capture or cleanup is incomplete. Run-scoped evidence is preserved beneath the report directory, while temporary configuration secrets are removed.
+
+Known automatic schema preparation is not an initial blocker. Matching Hibernate startup evidence from the completed run establishes that the intended quoted schema was loaded. Imported evidence without that proof retains the applicable schema blocker; mismatches and schema validation failures also block. A generated properties file alone is not execution proof. The synthetic missing-API case has one blocker initially, two after a failed guided run with proven schema loading, and three when imported failed TVU evidence lacks that proof.
+
+## Reports and terminal behavior
+
+Export full technical report writes HTML, JSON and plain text and shows their paths. R3 support packaging automatically collects generated sanitized evidence, including guided-run provenance, schema loading, TVU counts, API correlation and runtime/classpath proof. It excludes proprietary binaries, keys and keystores, scans the completed ZIP again and creates a SHA-256 file. It refuses to publish the package when its safety checks fail.
+
+Menus use ASCII > with arrow keys, j/k, Enter and q. Plain terminals use numbered labels. CI, JSON and redirected output remain deterministic and noninteractive. The terminal cursor and input mode are restored on normal exit, cancellation and handled failure. Actual packaged terminal screenshots and transcripts are generated by Docker validation; they are not recreated report content.
+
+All public fixtures are synthetic. A successful synthetic guided run does not substitute for acceptance against an operator-confirmed isolated copy of a real Corda environment.

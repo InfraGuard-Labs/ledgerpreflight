@@ -119,7 +119,7 @@ class Terminal:
 
     def action(self, label):
         lines = list(self.screen.display)
-        first = next(i for i, line in enumerate(lines) if line.startswith('> '))
+        first = max(i for i, line in enumerate(lines) if line.startswith('> '))
         choices = []
         for line in lines[first:]:
             if 'Up/Down' in line:
@@ -211,12 +211,12 @@ for variant in ('blocked-no-tvu', 'blocked-tvu', 'compatible'):
     else:
         assert 'NOT READY TO UPGRADE' in terminal.display() and 'CorDapp compatibility' in terminal.display()
         if variant == 'blocked-tvu':
-            for term in ('2 issues need attention', '650 processed', '449 passed', '201 failed', '201 supplied failures match'):
+            for term in ('3 blockers', '650 processed', '449 passed', '201 failed', '201 supplied failures match'):
                 assert term in terminal.display(), term
             terminal.capture('36-hierarchy-tvu-result.png', 'Correlated TVU failure with no inherited-helper noise')
         else:
-            assert '1 issue needs attention' in terminal.display() and 'View TVU evidence' not in terminal.display()
-            terminal.capture('30-hierarchy-static-result.png', 'Static blocker and schema review without a false incomplete issue')
+            assert '1 blocker' in terminal.display() and 'View TVU evidence' not in terminal.display()
+            terminal.capture('30-hierarchy-static-result.png', 'Static blocker with automatic guided schema preparation')
         terminal.action('View compatibility evidence')
         terminal.menu()
         for term in ('example-old-contract.jar', 'org.example.runtime.Amounts.total(Iterable)', 'Current runtime', 'Target runtime', 'Target verifier', 'Method found', 'Method missing'):

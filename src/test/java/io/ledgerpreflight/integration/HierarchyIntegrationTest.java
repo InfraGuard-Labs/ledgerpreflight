@@ -65,12 +65,12 @@ class HierarchyIntegrationTest {
     }
     @Test void noTvuKeepsOnlyConfirmedCompatibilityIssueAndSchemaReview()throws Exception{
         var fixture=HierarchyFixtureFactory.create(root,"blocked",true,true);Assessment assessment=assess(fixture,false);compatible(assessment);
-        assertEquals("BLOCKED",assessment.status());assertEquals(List.of("CorDapp compatibility","Schema configuration"),ProductView.issues(assessment).stream().map(ProductView.Issue::title).toList());
+        assertEquals("BLOCKED",assessment.status());assertEquals(List.of("CorDapp compatibility"),ProductView.issues(assessment).stream().map(ProductView.Issue::title).toList());assertEquals("AUTO_CONFIGURABLE",ProductView.schemaSetupStatus(assessment));
         assertEquals(1,assessment.findings().stream().filter(f->f.category().equals("API_COMPATIBILITY")&&f.severity().equals("BLOCKED")).count());
         SymbolResult removed=RequiredCompatibilityIntegrationTest.required(assessment);assertEquals(Resolution.MISSING_METHOD,removed.resolution());
         assertEquals("found",removed.current().memberStatus());assertEquals("absent",removed.target().memberStatus());
         assertEquals("absent",removed.contexts().stream().filter(c->c.context()==ExecutionContext.TARGET_VERIFIER).findFirst().orElseThrow().proof().memberStatus());
-        String text=ProductView.result(assessment);assertTrue(text.contains("1 issue needs attention"));assertFalse(text.contains("201"));assertFalse(text.contains("TVU validation"));
+        String text=ProductView.result(assessment);assertTrue(text.contains("1 blocker"));assertFalse(text.contains("201"));assertFalse(text.contains("TVU validation"));
         assertEquals(Boolean.FALSE,assessment.evidence().get("tvu-evidence-supplied"));
     }
     @Test void all201TvuDetailsStillCorrelateWithoutInheritedHelperNoise()throws Exception{
@@ -78,7 +78,7 @@ class HierarchyIntegrationTest {
         assertEquals(List.of("CorDapp compatibility","TVU validation","Schema configuration"),ProductView.issues(assessment).stream().map(ProductView.Issue::title).toList());
         var tvu=(TvuEvidence)assessment.evidence().get("tvu-summary");assertEquals(650L,tvu.processed());assertEquals(449L,tvu.succeeded());assertEquals(201L,tvu.failed());assertEquals(201,tvu.detailedRecords());
         assertEquals("201 supplied failures match the compatibility problem.",ProductView.correlation(assessment,tvu));
-        assertEquals(1,assessment.findings().stream().filter(f->f.id().equals("LP-TVU-002")).count());assertTrue(ProductView.result(assessment).contains("2 issues need attention"));
+        assertEquals(1,assessment.findings().stream().filter(f->f.id().equals("LP-TVU-002")).count());assertTrue(ProductView.result(assessment).contains("3 blockers"));
     }
     @Test void facadeProofExportRetainsReferencedOwnerAndActualDeclaration()throws Exception{
         var fixture=HierarchyFixtureFactory.create(root,"compatible",false,true);Assessment assessment=assess(fixture,false);compatible(assessment);

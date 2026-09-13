@@ -83,7 +83,7 @@ class CompatibilityProofUxTest {
         var a=assessment(List.of(first,second),Map.of());String text=ResultEvidence.compatibility(a);
         assertTrue(text.contains("example-old-contract.jar"));assertTrue(text.contains("example-payments.bin"));
         assertEquals(1,text.split("Referenced API",-1).length-1);assertEquals(1,ProductView.issues(a).size());
-        assertTrue(ProductView.result(a).contains("1 issue needs attention"));
+        assertTrue(ProductView.result(a).contains("1 blocker"));
     }
     @Test void groupedSourceCountAndExportRetainExactProvenance() throws Exception {
         Finding first=proof("found","absent","missing-method","BLOCKED","METHOD");List<String> raw=new ArrayList<>(first.technicalEvidence());
