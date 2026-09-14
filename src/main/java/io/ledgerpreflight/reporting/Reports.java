@@ -21,7 +21,7 @@ public final class Reports {
     public static String terminal(Assessment a){return terminal(a,false);}
     public static String findingSummary(Finding finding){return finding.id()+" · "+executiveTitle(finding)+"\n"+executiveWhy(finding);}
     public static String terminal(Assessment a,boolean verbose){
-        if(!verbose){StringBuilder out=new StringBuilder();for(String line:ProductView.result(a).split("\n",-1))terminalLine(out,line);return out.toString();}
+        if(!verbose){StringBuilder out=new StringBuilder();for(String line:ProductView.result(a).split("\n"))terminalLine(out,line);return out.toString();}
         StringBuilder out=new StringBuilder("LedgerPreflight 0.1.0\nKnow what will break before you upgrade Corda.\n\nUpgrade: ").append(a.sourceVersion()).append(" -> ").append(a.targetVersion()).append("\nOVERALL STATUS: ").append(a.status()).append("\n");
         JsonNode host=JSON.valueToTree(a.evidence().getOrDefault("environment",Map.of())).path("host");
         out.append("\nExecution host OS: ").append(host.path("executionOs").asText("UNKNOWN")).append(" (").append(host.path("executionArch").asText("UNKNOWN")).append(")\n")

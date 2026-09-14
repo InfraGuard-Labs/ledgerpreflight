@@ -32,7 +32,7 @@ class IndependentExecutionContextRemediationTest {
         var fixture=RunARegressionTest.fixture(root,true);
         var options=new AssessmentService.Options(fixture.node(),fixture.kit(),null,null,null,null,null,List.of(),null,null,"all-4.12",fixture.root().resolve("host.json"));
         Assessment assessment=new AssessmentService().assess(options);
-        limitedSourceWithoutConfirmedApiRoot(assessment);assertEquals("UNKNOWN",assessment.status());
+        limitedSourceWithoutConfirmedApiRoot(assessment);assertEquals("BLOCKED",assessment.status());assertEquals(List.of("LP-DB-001"),assessment.findings().stream().filter(f->f.severity().equals("BLOCKED")).map(Finding::id).toList());
         assertFalse(assessment.findings().stream().anyMatch(f->f.id().equals("LP-LEGACY-001")&&f.severity().equals("BLOCKED")),"A duplicate class without proven launch order is not confirmed shadowing");
     }
 }

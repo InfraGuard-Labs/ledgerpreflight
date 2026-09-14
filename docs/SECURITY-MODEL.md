@@ -1,6 +1,6 @@
 # Security model
 
-LedgerPreflight reads operator-supplied artifacts offline. Static assessment does not connect to a database, launch a node, execute TVU, deserialize Corda objects, load CorDapp classes or make upgrade changes. Guided TVU is a separate explicitly confirmed operation on an operator-prepared isolated copy. Docker development and validation use synthetic inputs only. Use read-only input mounts and a dedicated writable report directory.
+LedgerPreflight reads operator-supplied artifacts offline. v0.1.0 does not connect to a database, launch a node, execute TVU, deserialize Corda objects, load CorDapp classes or make upgrade changes. Interactive and command-line TVU import only parse supplied files. Docker development and validation use synthetic inputs only. Use read-only input mounts and a dedicated writable report directory.
 
 ## Untrusted inputs
 

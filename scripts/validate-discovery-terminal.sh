@@ -65,7 +65,13 @@ set +e
 $command --non-interactive --output /tmp/discovery-terminal/noninteractive >"/output/discovery-terminal-$VERSION_ID-noninteractive.txt" 2>/tmp/discovery-terminal/stderr
 code=$?
 set -e
-test "$code" = 1
+# This discovery fixture has an unproven mixed-case PostgreSQL schema.
+# Static assessment must block it until relevant schema evidence is supplied.
+test "$code" = 2
+grep -qF 'NOT READY TO UPGRADE' "/output/discovery-terminal-$VERSION_ID-noninteractive.txt"
+grep -qF '1 blocker' "/output/discovery-terminal-$VERSION_ID-noninteractive.txt"
+grep -qF 'Schema configuration' "/output/discovery-terminal-$VERSION_ID-noninteractive.txt"
+grep -qF 'TVU schema configuration is not proven.' "/output/discovery-terminal-$VERSION_ID-noninteractive.txt"
 if grep -qF "$(printf '\033')" "/output/discovery-terminal-$VERSION_ID-noninteractive.txt"; then
   printf 'Non-interactive output must not contain terminal control sequences\n' >&2
   exit 1

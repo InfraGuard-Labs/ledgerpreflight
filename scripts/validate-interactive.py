@@ -23,7 +23,7 @@ for kind in ('environment','blocked','clean'):
     assert schema['databaseVendor']=='PostgreSQL'
     if kind=='environment':assert schema['schemas']==['ExampleMixedCaseIssuer','shared_reference']
 class Terminal:
-    def __init__(self,name,kind='blocked',args=(),cols=92,rows=52,env=None,node=None,kit=None,guided=False,output=None):
+    def __init__(self,name,kind='blocked',args=(),cols=92,rows=52,env=None,node=None,kit=None,prompted=False,output=None):
         self.name=name;self.cols=cols;self.rows=rows;self.data=bytearray();self.decoder=codecs.getincrementaldecoder('utf8')('replace')
         self.screen=pyte.Screen(cols,rows);self.stream=pyte.Stream(self.screen)
         base='/work/'+kind
@@ -33,7 +33,7 @@ class Terminal:
         if self.pid==0:
             os.environ['TERM']='xterm-256color';os.environ.pop('CI',None)
             if env:os.environ.update(env)
-            os.execvp(LAUNCH[0],LAUNCH if guided else [*LAUNCH,'assess','--node',node or base+'/ExampleIssuer','--upgrade-kit',kit or base+'/upgrade-kit','--output',output or '/work/reports/'+name,*extras,*args])
+            os.execvp(LAUNCH[0],LAUNCH if prompted else [*LAUNCH,'assess','--node',node or base+'/ExampleIssuer','--upgrade-kit',kit or base+'/upgrade-kit','--output',output or '/work/reports/'+name,*extras,*args])
         fcntl.ioctl(self.fd,termios.TIOCSWINSZ,struct.pack('HHHH',rows,cols,0,0))
     def read(self,timeout=.1):
         if select.select([self.fd],[],[],timeout)[0]:
@@ -95,7 +95,7 @@ class Terminal:
 
 def display(t):return '\n'.join(t.screen.display)
 def no_internal(t):
-    for text in ('Other JARs','Discovery confidence','REQUIRED_OR_UNRESOLVED','Analyzer:','JVM descriptor','legacy-jars/','sha256','PARTIAL','MEDIUM','HIGH','Understand the blockers','View technical evidence','View full technical report','LP-','currentInventory','targetInventory','retained symbol','corda.jar-old'):
+    for text in ('Run TVU safely','Run TVU again','Exact execution command','TVU SETUP FAILURE','Other JARs','Discovery confidence','REQUIRED_OR_UNRESOLVED','Analyzer:','JVM descriptor','legacy-jars/','sha256','PARTIAL','MEDIUM','HIGH','Understand the blockers','View technical evidence','View full technical report','LP-','currentInventory','targetInventory','retained symbol','corda.jar-old'):
         assert text not in display(t),text
     assert not re.search(r'\d+ warnings',display(t))
 t=Terminal('environment','environment');t.menu()
@@ -120,7 +120,7 @@ assert 'READY TO SHARE' in display(t) and 'Final package rescanned' in display(t
 t.shot('09-r3-support-ready.png');t.action('Back');t.menu();t.action('Exit');t.finish(2);t.shot('10-clean-exit.png')
 
 t=Terminal('ready-for-tvu','clean');t.menu();t.choose(1);t.menu();no_internal(t)
-assert 'READY FOR TVU' in display(t) and 'Run TVU safely' in display(t)
+assert 'READY FOR TVU' in display(t) and 'Import existing TVU results' in display(t)
 t.shot('03-ready-for-tvu.png');assert 'View TVU evidence' not in display(t);t.action('Import existing TVU results');t.until('TVU log, error ZIP');t.shot('14-import-tvu-results.png')
 os.write(t.fd,b'/work/clean/tvu.log\n');t.menu();t.action('Analyze this run');t.menu()
 assert 'READY TO UPGRADE' in display(t) and 'View TVU evidence' in display(t)
@@ -155,12 +155,19 @@ t=Terminal('node-selection','clean',node=str(company));t.menu();assert 'Non-vali
 kit=pathlib.Path('/work/ambiguous-kit');shutil.copytree('/work/clean/upgrade-kit',kit)
 shutil.copyfile(kit/'renamed-runtime.bin',kit/'alternate-runtime.jar');shutil.copyfile(kit/'renamed-validator.jar',kit/'alternate-tool.jar')
 t=Terminal('artifact-selection','clean',kit=str(kit));t.menu();t.choose(1);t.menu();t.choose(1);t.menu();t.choose(2);t.finish(0)
-t=Terminal('guided-start','clean',guided=True);t.until('Current node directory:');os.write(t.fd,b'/work/clean/ExampleIssuer\n');t.until('Target upgrade-kit directory:');os.write(t.fd,b'/work/clean/upgrade-kit\n');t.menu();t.choose(2);t.finish(0)
-t=Terminal('guided-cancel','clean',guided=True);t.until('Current node directory:');os.write(t.fd,b'\n');t.finish(0)
-# A discovered but non-executable synthetic validator fails setup before any process starts.
-t=Terminal('tvu-setup-cancel','clean');t.menu();t.action('Continue');t.menu();t.action('Run TVU safely');t.menu()
-assert 'TVU SETUP FAILURE' in display(t);t.action('Cancel');t.menu();t.action('Exit');t.finish(1)
-assert not list(pathlib.Path('/work/reports/tvu-setup-cancel').glob('tvu/*'))
+t=Terminal('prompted-start','clean',prompted=True);t.until('Current node directory:');os.write(t.fd,b'/work/clean/ExampleIssuer\n');t.until('Target upgrade-kit directory:');os.write(t.fd,b'/work/clean/upgrade-kit\n');t.menu();t.choose(2);t.finish(0)
+t=Terminal('prompted-cancel','clean',prompted=True);t.until('Current node directory:');os.write(t.fd,b'\n');t.finish(0)
+# Cancelling an existing-evidence import keeps the current assessment and creates no import output.
+t=Terminal('import-cancel','clean');t.menu();t.action('Continue');t.menu();t.action('Import existing TVU results');t.until('TVU log, error ZIP')
+os.write(t.fd,b'\n');t.menu();assert 'READY FOR TVU' in display(t);t.action('Exit');t.finish(1)
+assert not list(pathlib.Path('/work/reports/import-cancel').glob('imported-tvu-*'))
+# Obsolete execution flags are refused by the actual packaged CLI before any input access.
+for flag in ('--run-tvu','--confirm-isolated-db','--tvu-node-conf=/missing/node.conf','--tvu-schema=ExampleSchema'):
+    process=subprocess.run([*LAUNCH,'assess','--node','/missing-node','--upgrade-kit','/missing-kit','--json',flag],capture_output=True,timeout=20)
+    assert process.returncode==2 and process.stdout==b''
+    assert b'v0.1.0 does not run TVU' in process.stderr and b'--tvu-results' in process.stderr
+    assert b'No assessment inputs were read' in process.stderr
+    results['obsolete-'+flag.split('=')[0][2:]]={'exit':2,'rejectedBeforeAssessment':True,'noStandardOutput':True}
 # The asserted real-structure fixture must also traverse Continue using the shipped launcher.
 for kind,fixture in [('run-a','normal'),('run-a-limited','large')]:
     destination=pathlib.Path('/work')/kind

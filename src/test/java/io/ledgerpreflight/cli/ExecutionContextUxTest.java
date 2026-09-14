@@ -72,12 +72,12 @@ class ExecutionContextUxTest {
     @CsvSource({"absent,missing-method,unknown,unknown,TARGET_NODE_RUNTIME,TARGET_VERIFIER","unknown,unknown,absent,missing-method,TARGET_VERIFIER,TARGET_NODE_RUNTIME"})
     void unresolvedContextDoesNotDowngradeOtherConfirmedContext(String nodeMember,String nodeResolution,String verifierMember,String verifierResolution,String blocked,String unknown){
         var a=assessment(List.of(proof(nodeMember,nodeResolution,verifierMember,verifierResolution,blocked,unknown)));
-        assertEquals(List.of("CorDapp compatibility","Compatibility analysis incomplete"),ProductView.issues(a).stream().map(ProductView.Issue::title).toList());
+        assertEquals(List.of("CorDapp compatibility"),ProductView.issues(a).stream().map(ProductView.Issue::title).toList());
         String result=ProductView.result(a),text=ResultEvidence.compatibility(a);
-        assertTrue(result.contains("Additional compatibility analysis is incomplete."));
-        assertTrue(result.contains("NEXT STEP\nResolve the CorDapp compatibility blocker and complete the unresolved reviews."));
+        assertFalse(result.contains("Additional compatibility analysis is incomplete."));
+        assertTrue(result.contains("NEXT STEP\nResolve the CorDapp compatibility blocker"));
         assertTrue(text.contains("Method missing"));assertTrue(text.contains("Class lookup incomplete · Method lookup incomplete"));
-        assertTrue(text.contains("The confirmed incompatibility still needs resolution."));quiet(result);quiet(text);
+        assertFalse(text.contains("Additional compatibility analysis is incomplete."));quiet(result);quiet(text);
     }
     @Test void confirmedRootPrecedesSeparateUnknownReferencesAndKeepsItsSource(){
         Finding unknown=replace(replace(proof("unknown","unknown","","","","TARGET_NODE_RUNTIME"),"owner","org/example/dependency/Unresolved"),"sourceArtifact","cordapps/example-other.jar");
@@ -85,14 +85,14 @@ class ExecutionContextUxTest {
         assertTrue(result.indexOf("CorDapp compatibility")<result.indexOf("Compatibility analysis incomplete"));
         assertTrue(text.indexOf("Amounts.total")<text.indexOf("Unresolved.total"));
         assertFalse(text.contains("example-other.jar"));assertTrue(text.contains("example-contracts.jar"));
-        assertTrue(result.contains("NEXT STEP\nResolve the CorDapp compatibility blocker and complete the unresolved reviews."));quiet(result);quiet(text);
+        assertTrue(result.contains("NEXT STEP\nResolve the CorDapp compatibility blocker"));quiet(result);quiet(text);
     }
     @Test void targetPairingUncertaintyIsASeparateReview(){
         Finding mapping=Finding.of("LP-CORDAPP-005","Current CorDapp has no unique target match","WARNING","CORDAPP","HIGH","INPUT","assessment",List.of("target/cordapps/example-rebuilt.jar"),"Rebuild coverage is uncertain","Supply a unique replacement");
         var a=assessment(List.of(mapping,both()));String result=ProductView.result(a),text=ResultEvidence.compatibility(a);
         assertEquals(List.of("CorDapp compatibility","Target CorDapp mapping"),ProductView.issues(a).stream().map(ProductView.Issue::title).toList());
-        assertTrue(result.contains("Target CorDapp mapping: unresolved."));assertTrue(result.contains("1 blocker"));
-        assertFalse(result.contains("Compatibility analysis incomplete"));assertTrue(text.contains("Runtime API compatibility was checked independently."));
+        assertFalse(result.contains("Target CorDapp mapping"));assertTrue(result.contains("1 blocker"));
+        assertFalse(result.contains("Compatibility analysis incomplete"));assertFalse(text.contains("Target CorDapp mapping"));
         assertFalse(text.contains("example-rebuilt.jar"));assertTrue(text.contains("Method missing"));quiet(result);quiet(text);
     }
     @Test void absentVerifierEvidenceDoesNotInventAnEvaluatedContext(){

@@ -23,7 +23,7 @@ class ProductCorrectionTest {
         var a=new AssessmentService(limits).assess(ProductAcceptanceFixture.options(f,false));
         ProductAcceptanceFixture.assertIdentity(a,true);
         assertEquals("PARTIAL",((Map<?,?>)a.evidence().get("analysis-coverage")).get("status"));
-        assertEquals("READY FOR TVU",a.status());assertFalse(a.findings().stream().anyMatch(x->x.id().equals("LP-INPUT-001")));
+        assertEquals("BLOCKED",a.status());assertEquals(List.of("LP-DB-001"),a.findings().stream().filter(x->x.severity().equals("BLOCKED")).map(Finding::id).toList());assertFalse(a.findings().stream().anyMatch(x->x.id().equals("LP-INPUT-001")));
         assertFalse(a.findings().stream().anyMatch(x->x.id().equals("LP-DISCOVERY-002")||x.id().equals("LP-CORDAPP-004")));
     }
     @Test void perArtifactDeepBudgetDoesNotStarveLaterLegacyApps()throws Exception {

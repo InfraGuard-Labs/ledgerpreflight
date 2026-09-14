@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-/** Small Linux terminal adapter. Raw mode is bounded to menu selection or cancellable progress. */
+/** Small Linux terminal adapter. Raw mode is bounded to menu selection. */
 public class SessionTerminal {
     private final Reader input;
     private final PrintWriter out;
@@ -40,32 +40,6 @@ public class SessionTerminal {
         out.flush();
     }
     public void screen(){if(advanced){out.print("\u001b[2J\u001b[H");out.flush();}}
-    /** Keeps cancellation responsive while a bounded subprocess runner owns the work. */
-    public ProgressSession progress() throws IOException {return new ProgressSession();}
-    public class ProgressSession implements AutoCloseable {
-        private String saved;private Thread hook;private boolean closed;private long lastPlain;
-        protected ProgressSession() throws IOException {
-            if(!advanced)return;
-            try {
-                saved=terminalMode("-g").strip();
-                terminalMode("-icanon","-echo","min","0","time","1");
-                hook=new Thread(()->restore(saved),"restore-tvu-terminal");Runtime.getRuntime().addShutdownHook(hook);
-                out.print("\u001b[?25l");out.flush();
-            }catch(Exception e){if(saved!=null)restore(saved);saved=null;advanced=false;}
-        }
-        public void show(String text){
-            if(saved==null){long now=System.nanoTime();if(lastPlain!=0&&now-lastPlain<TimeUnit.SECONDS.toNanos(5))return;
-                if(lastPlain==0)SessionTerminal.this.text("Running TVU. Detailed output is captured. Enter or q cancels.");lastPlain=now;
-                SessionTerminal.this.text(String.join(" · ",Arrays.stream(text.split("\n")).filter(line->line.startsWith("Transactions processed")||line.startsWith("Failures observed")||line.startsWith("Elapsed")).map(line->line.replaceAll(" {2,}",": ")).toList()));return;}
-            screen();SessionTerminal.this.text(text+"\nDetailed TVU/verifier output is being captured.\n\n> Cancel TVU\nEnter or q cancels.");
-        }
-        public boolean cancelled(){
-            try {for(int count=0;count<32&&input.ready();count++){int c=input.read();if(c<0)break;if(c==3||c==4||c=='q'||c=='Q'||c=='\r'||c=='\n')return true;}}
-            catch(IOException e){return true;}
-            return false;
-        }
-        public void close(){if(closed)return;closed=true;if(saved!=null)restore(saved);if(hook!=null)try{Runtime.getRuntime().removeShutdownHook(hook);}catch(IllegalStateException ignored){} }
-    }
     public String ask(String prompt)throws IOException {
         text(prompt+" (blank returns)");
         StringBuilder value=new StringBuilder();int c;

@@ -8,7 +8,7 @@ for name in ('ActiveRuntimeRegressionTest','SimpleResultActionsTest'):
     assert all(int(suite.get(k,'0'))==0 for k in ('failures','errors','skipped')),name
     suites[name]={'tests':int(suite.get('tests')),'cases':[x.get('name') for x in suite.findall('testcase')]}
 assert suites['ActiveRuntimeRegressionTest']['tests']==12
-assert suites['SimpleResultActionsTest']['tests']==9
+assert suites['SimpleResultActionsTest']['tests']==11
 ubuntu={}
 for version in ('18.04','20.04','22.04','24.04'):
     base=root/'linux-matrix';a=json.loads((base/f'active-runtime-{version}/report.json').read_text())
@@ -24,7 +24,7 @@ for version in ('18.04','20.04','22.04','24.04'):
     assert not any('corda.jar-old' in x['path'] or 'unreferenced-driver' in x['path'] for x in coverage['currentInventory'])
     assert a['status']=='BLOCKED' and {'LP-API-001','LP-LEGACY-001','LP-INTERNAL-001'}<={f['id'] for f in a['findings']}
     raw=(base/f'active-runtime-{version}.ansi').read_bytes()
-    assert all(x in raw for x in (b'> Continue',b'> Run TVU safely',b'Export full technical report',b'Session complete',b'4.11.6',b'Platform 13'))
+    assert all(x in raw for x in (b'> Continue',b'> Import existing TVU results',b'Export full technical report',b'Session complete',b'4.11.6',b'Platform 13'))
     assert not any(x in raw for x in (b'View technical evidence',b'View full technical report',b'corda.jar-old',b'currentInventory',b'LP-API',b'OutOfMemoryError'))
     assert not re.search(rb'\d+ warnings',raw)
     assert raw.rfind(b'\x1b[?25h')>raw.rfind(b'\x1b[?25l')
@@ -51,7 +51,7 @@ results={'acceptance':{label:{'result':'PASS','behavior':description} for label,
 ('E','Invalid canonical filename does not outrank strongly identified alternative'),
 ('F','Version, platform, minimum Java and vendor propagate consistently'))},
 'suites':suites,'ubuntu':ubuntu,
-'dynamicScenarios':{'compatibilitySchemaTvu':'PASS: contextual evidence, guided rerun, import, export/support and exit','compatibilityOnly':'PASS: relevant evidence, guided execution, import and artifact actions','readyForTvu':'PASS: guided execution and import without invented evidence','readyToUpgrade':'PASS: supplied TVU evidence and contextual actions'},
+'dynamicScenarios':{'compatibilitySchemaTvu':'PASS: contextual evidence, existing TVU import, export/support and exit','compatibilityOnly':'PASS: relevant evidence, existing TVU import and artifact actions','readyForTvu':'PASS: existing TVU import without invented evidence','readyToUpgrade':'PASS: supplied TVU evidence and contextual actions'},
 'normalOutput':'PASS: no generic dashboard, raw warning totals or diagnostic data',
 'evidence':'PASS: human compatibility/schema/TVU pages; complete diagnostics exported',
 'driverScope':'PASS: unreferenced driver excluded; referenced and explicit target-app driver linkage retained'}

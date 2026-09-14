@@ -26,19 +26,10 @@ class TvuSchemaExecutionTest {
     @Test void conflictingLoadedDefaultsCannotBeHandled()throws Exception{assertTrue(proof(loaded("ExampleSchema")+loaded("OtherSchema"),"ExampleSchema").mismatch());}
     @Test void repeatedMatchingStartupEvidenceIsConsistent()throws Exception{assertTrue(proof(loaded("ExampleSchema")+loaded("ExampleSchema"),"ExampleSchema").handled());}
     @Test void escapedEvidenceSymlinkIsRejected()throws Exception{Path outside=root.resolve("outside.log");Files.writeString(outside,loaded("ExampleSchema"));Path link=root.resolve("linked.log");Files.createSymbolicLink(link,outside);assertThrows(java.io.IOException.class,()->TvuSchemaEvidence.analyze(List.of(link),"ExampleSchema"));}
-    @Test void safePreparationDoesNotDependOnUnrelatedUnresolvedConfiguration()throws Exception{
-        Path config=root.resolve("node.conf");Files.writeString(config,"database.schema=ExampleSchema\ndataSource.url=\"jdbc:postgresql://database.example/example\"\nnotary.validating=$"+"{LP_UNSET_GUIDED_NOTARY}\n");
-        var evidence=new ConfigAnalyzer().analyze(config);assertEquals("CONFIGURED",evidence.safeSettings().get("schemaResolution"));assertTrue(ConfigAnalyzer.canPrepareTvuSchema(evidence,"4.12.11"));
-    }
-    @Test void primaryIsUsedAndExplicitUnknownSelectionIsRejected()throws Exception{
-        Path config=root.resolve("node.conf");Files.writeString(config,"database.schema=ExampleSchema\ndataSource.url=\"jdbc:postgresql://database.example/example?currentSchema=ExampleSchema,shared\"\n");
-        var evidence=new ConfigAnalyzer().analyze(config);assertEquals("ExampleSchema",ConfigAnalyzer.selectTvuSchema(evidence,null));
-        assertThrows(java.io.IOException.class,()->ConfigAnalyzer.selectTvuSchema(evidence,"shared"));assertThrows(java.io.IOException.class,()->ConfigAnalyzer.selectTvuSchema(evidence,"UndiscoveredSchema"));
-    }
-    @Test void noTvuCanPrepareSchemaWithoutCountingItAsABlocker()throws Exception{
+    @Test void unprovenMixedCaseSchemaRequiresReviewWithoutAutomaticPreparation()throws Exception{
         var fixture=ProductAcceptanceFixture.create(root,false,true);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(fixture,false));
-        assertEquals("READY FOR TVU",a.status());assertFalse(a.findings().stream().anyMatch(f->f.id().equals("LP-DB-001")));
-        assertEquals("AUTO_CONFIGURABLE",ProductView.schemaSetupStatus(a));assertTrue(ProductView.result(a).contains("automatically"));
+        assertEquals("BLOCKED",a.status());assertTrue(a.findings().stream().anyMatch(f->f.id().equals("LP-DB-001")&&f.severity().equals("BLOCKED")));
+        assertEquals("REQUIRED_UNPROVEN",ProductView.schemaSetupStatus(a));assertFalse(ProductView.result(a).contains("automatically"));
     }
     @Test void importedResultsNeedActualLoadedProofEvenWithQuotedNodeConfiguration()throws Exception{
         var fixture=ProductAcceptanceFixture.create(root,false,true);
@@ -54,18 +45,5 @@ class TvuSchemaExecutionTest {
         var fixture=ProductAcceptanceFixture.create(root,false,true);Files.writeString(fixture.log(),loaded("ExampleMixedCaseIssuer")+"org.hibernate.tool.schema.spi.SchemaManagementException: Schema-validation: missing table [ExampleMixedCaseIssuer.vault_states]\n",StandardOpenOption.APPEND);
         var a=new AssessmentService().assess(ProductAcceptanceFixture.options(fixture,true));assertEquals("BLOCKED",a.status());assertEquals("FAILED",ProductView.schemaSetupStatus(a));
         assertFalse(((TvuSchemaEvidence.Proof)a.evidence().get("tvu-schema-execution")).handled());
-    }
-    @Test void explicitGuidedCandidateBindsRunProofWithoutErasingOriginalAmbiguity()throws Exception{
-        var fixture=ProductAcceptanceFixture.create(root,false,true);
-        Files.writeString(fixture.node().resolve("node.conf"),"database.schema=FirstSchema\ndataSource.url=\"jdbc:postgresql://database.example/example?currentSchema=SecondSchema\"\n");
-        Files.writeString(fixture.log(),loaded("SecondSchema"),StandardOpenOption.APPEND);
-        var options=ProductAcceptanceFixture.options(fixture,true);var base=new AssessmentService().assess(options);
-        var selected=AssessmentService.withGuidedSchemaProof(options,base,"SecondSchema");
-        assertEquals("HANDLED",ProductView.schemaSetupStatus(selected));assertEquals("UNKNOWN",selected.status());
-        assertTrue(selected.findings().stream().anyMatch(f->f.id().equals("LP-DB-002")));
-        assertFalse(selected.findings().stream().anyMatch(f->f.id().equals("LP-DB-001")));
-        assertThrows(java.io.IOException.class,()->AssessmentService.withGuidedSchemaProof(options,base,"UndiscoveredSchema"));
-        var wrong=AssessmentService.withGuidedSchemaProof(options,base,"FirstSchema");assertEquals("BLOCKED",wrong.status());
-        assertTrue(wrong.findings().stream().anyMatch(f->f.id().equals("LP-DB-004")));
     }
 }

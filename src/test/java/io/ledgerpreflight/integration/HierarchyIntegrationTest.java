@@ -65,12 +65,12 @@ class HierarchyIntegrationTest {
     }
     @Test void noTvuKeepsOnlyConfirmedCompatibilityIssueAndSchemaReview()throws Exception{
         var fixture=HierarchyFixtureFactory.create(root,"blocked",true,true);Assessment assessment=assess(fixture,false);compatible(assessment);
-        assertEquals("BLOCKED",assessment.status());assertEquals(List.of("CorDapp compatibility"),ProductView.issues(assessment).stream().map(ProductView.Issue::title).toList());assertEquals("AUTO_CONFIGURABLE",ProductView.schemaSetupStatus(assessment));
+        assertEquals("BLOCKED",assessment.status());assertEquals(List.of("CorDapp compatibility","Schema configuration"),ProductView.issues(assessment).stream().map(ProductView.Issue::title).toList());assertEquals("REQUIRED_UNPROVEN",ProductView.schemaSetupStatus(assessment));
         assertEquals(1,assessment.findings().stream().filter(f->f.category().equals("API_COMPATIBILITY")&&f.severity().equals("BLOCKED")).count());
         SymbolResult removed=RequiredCompatibilityIntegrationTest.required(assessment);assertEquals(Resolution.MISSING_METHOD,removed.resolution());
         assertEquals("found",removed.current().memberStatus());assertEquals("absent",removed.target().memberStatus());
         assertEquals("absent",removed.contexts().stream().filter(c->c.context()==ExecutionContext.TARGET_VERIFIER).findFirst().orElseThrow().proof().memberStatus());
-        String text=ProductView.result(assessment);assertTrue(text.contains("1 blocker"));assertFalse(text.contains("201"));assertFalse(text.contains("TVU validation"));
+        String text=ProductView.result(assessment);assertTrue(text.contains("2 blockers"));assertFalse(text.contains("201"));assertFalse(text.contains("TVU validation"));
         assertEquals(Boolean.FALSE,assessment.evidence().get("tvu-evidence-supplied"));
     }
     @Test void all201TvuDetailsStillCorrelateWithoutInheritedHelperNoise()throws Exception{

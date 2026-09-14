@@ -37,8 +37,18 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 THE POSSIBILITY OF SUCH DAMAGE.
 
 The Linux x86_64 distribution additionally contains an unmodified Eclipse Temurin
-Java17 runtime. Its full upstream licensing and notices are retained in runtime/legal
-and runtime/release identifies the exact distribution. OpenJDK is licensed under
-GPLv2 with the Classpath Exception and additional third-party notices as supplied.
-Matching upstream sources/releases: https://github.com/adoptium/temurin17-binaries
-and https://github.com/adoptium/jdk17u .
+Java 17.0.20.1+1 runtime. Its full upstream licensing and notices are retained in
+runtime/legal; runtime/release identifies the exact distribution. OpenJDK is
+licensed under GPLv2 with the Classpath Exception and the additional third-party
+notices supplied with that runtime.
+
+Upstream runtime release:
+https://github.com/adoptium/temurin17-binaries/releases/tag/jdk-17.0.20.1%2B1
+
+Exact matching upstream source archive:
+https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jdk-sources_17.0.20.1_1.tar.gz
+
+The same unmodified source archive is distributed with LedgerPreflight v0.1.0:
+https://github.com/InfraGuard-Labs/ledgerpreflight/releases/download/v0.1.0/OpenJDK17U-jdk-sources_17.0.20.1_1.tar.gz
+Its SHA-256 is included in the release checksum list. The source archive is a
+separate license-compliance download; installation does not require it.

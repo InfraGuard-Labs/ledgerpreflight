@@ -36,8 +36,8 @@ final class ResultEvidence {
         }
         if(roots.isEmpty())out.append("\n\nProblem\n").append(issue.map(ProductView.Issue::happened).orElse("Compatibility requires review."));
         else if(roots.size()>3)out.append("\n\nAdditional API evidence is available in the exported technical report.");
-        if(findings.stream().anyMatch(f->f.id().equals("LP-CORDAPP-005")))out.append("\n\nTarget CorDapp mapping\nUnresolved.").append(roots.isEmpty()?"":" Runtime API compatibility was checked independently.");
-        if(!confirmed.isEmpty()&&findings.stream().anyMatch(f->f.severity().equals("UNKNOWN")||!field(f,"unknownContexts").isEmpty()))out.append("\n\nAdditional compatibility analysis is incomplete.\nThe confirmed incompatibility still needs resolution.");
+        if(confirmed.isEmpty()&&findings.stream().anyMatch(f->f.id().equals("LP-CORDAPP-005")))out.append("\n\nTarget CorDapp replacements\nSome current CorDapps could not be matched to target replacements.").append(roots.isEmpty()?"":" Runtime API compatibility was checked independently.");
+        if(!confirmed.isEmpty()&&findings.stream().anyMatch(f->f.severity().equals("UNKNOWN")))out.append("\n\nAdditional compatibility analysis is incomplete.\nThe confirmed incompatibility still needs resolution.");
         out.append("\n\nImpact\n").append(issue.map(ProductView.Issue::matters).orElse("Historical transactions may fail re-verification."));
         out.append("\n\nRecommended action\n").append(issue.map(ProductView.Issue::action).orElse("Review the exported report and validate again."));
         return out.toString();
@@ -82,19 +82,19 @@ final class ResultEvidence {
             List<String> additional=schemas.stream().map(Object::toString).filter(s->!s.equals(primary)).limit(4).toList();
             if(!additional.isEmpty())out.append("\n\nAdditional configured schemas\n").append(String.join("\n",additional));
         }
-        String setup=ProductView.schemaSetupStatus(a);boolean automatic=setup.equals("AUTO_CONFIGURABLE"),handled=setup.equals("HANDLED");
-        out.append("\n\nWhat LedgerPreflight found\n").append(issue.map(ProductView.Issue::happened).orElse(handled?"The supplied TVU run loaded the intended schema.":automatic?"The node uses a mixed-case PostgreSQL schema.":"The effective schema needs confirmation."));
-        out.append("\n\nWhy this matters\n").append(issue.map(ProductView.Issue::matters).orElse(handled?"The required TVU schema configuration is established for the supplied run.":"Node and TVU must use the intended schema."));
-        out.append("\n\nRecommended action\n").append(issue.map(ProductView.Issue::action).orElse(automatic?"Run TVU safely; LedgerPreflight will prepare the schema configuration.":handled?"Resolve any remaining validation blockers before upgrading.":"Confirm the intended schema before TVU validation."));
+        String setup=ProductView.schemaSetupStatus(a);boolean handled=setup.equals("HANDLED"),configured=setup.equals("CONFIGURATION_PROVEN");
+        out.append("\n\nWhat LedgerPreflight found\n").append(issue.map(ProductView.Issue::happened).orElse(handled?"The supplied TVU run loaded the intended schema.":configured?"The selected configuration explicitly names the intended schema.":"The effective schema needs confirmation."));
+        out.append("\n\nWhy this matters\n").append(issue.map(ProductView.Issue::matters).orElse(handled?"The required TVU schema configuration is established for the supplied run.":configured?"Static configuration is established; actual TVU schema loading still needs validation.":"Node and TVU must use the intended schema."));
+        out.append("\n\nRecommended action\n").append(issue.map(ProductView.Issue::action).orElse(handled?"Resolve any remaining validation blockers before upgrading.":"Confirm the intended schema using the official Corda TVU procedure, then import the resulting logs and error bundle."));
         return out.toString();
     }
     static String tvu(Assessment a){
         if(!(a.evidence().get("tvu-summary") instanceof TvuEvidence t))return "TVU EVIDENCE\n\nComplete TVU results could not be established.\n\nRecommended action\nReview the exported report and supply one complete TVU run.";
         String correlation=ProductView.correlation(a,t);
         String root,action;
-        if(t.completeSuccess()){root="The supplied run reports complete successful verification.";action="Confirm this run covers the intended artifacts and database snapshot, then follow the supported upgrade procedure.";}
-        else if(!correlation.isEmpty()){root=correlation;action="Resolve the compatibility issue and rerun complete TVU.";}
-        else if(t.schemaValidationFailure()){root="TVU reported a schema-validation failure. This does not establish that the physical table is absent.";action="Confirm the intended TVU schema and rerun validation.";}
+        if(t.completeSuccess()){root="The supplied run reports complete successful verification.";action=a.status().equals("READY TO UPGRADE")?"Confirm this run covers the intended artifacts and database snapshot, then follow the supported upgrade procedure.":"Confirm this run covers the intended artifacts and database snapshot. Resolve the remaining assessment issues before upgrading.";}
+        else if(!correlation.isEmpty()){root=correlation;action="Resolve the compatibility issue, rerun complete TVU separately, then import the new results.";}
+        else if(t.schemaValidationFailure()){root="TVU reported a schema-validation failure. This does not establish that the physical table is absent.";action="Confirm the intended TVU schema, rerun validation separately, then import the new results.";}
         else {root="The supplied evidence does not establish a confirmed compatibility root cause.";action="Review the exported failure evidence and supply one complete TVU run.";}
         return "TVU EVIDENCE\n\nTransactions processed   "+Objects.toString(t.processed(),"Not established")+"\nPassed                   "+Objects.toString(t.succeeded(),"Not established")+"\nFailed                   "+Objects.toString(t.failed(),"Not established")+"\n\nRoot cause\n"+root+"\n\nRecommended action\n"+action;
     }

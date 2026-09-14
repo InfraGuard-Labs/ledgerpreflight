@@ -77,7 +77,7 @@ public class ExecutionContextIntegrationTest {
         var f=fixture(root,"blocked",true,false);
         Files.copy(f.kit().resolve("cordapps/example-new-contract.jar"),f.kit().resolve("cordapps/example-new-workflow.jar"),StandardCopyOption.REPLACE_EXISTING);
         var a=assess(f);assertTrue(a.findings().stream().anyMatch(x->x.id().equals("LP-CORDAPP-005")));assertEquals("BLOCKED",a.status());assertEquals(Resolution.MISSING_METHOD,RequiredCompatibilityIntegrationTest.required(a).resolution());
-        assertTrue(ProductView.issues(a).stream().anyMatch(i->i.happened().equals("Target CorDapp mapping: unresolved.")));
+        assertTrue(ProductView.issues(a).stream().anyMatch(i->i.title().equals("Target CorDapp mapping")));
     }
     @ParameterizedTest @ValueSource(strings={"verifier-first","shim-first","unproven","contradictory"})
     void verifierLegacySelectionUsesProvenOrderOnly(String mode)throws Exception{
@@ -95,7 +95,7 @@ public class ExecutionContextIntegrationTest {
     @Test void unorderedSameContextDoesNotMakeOtherContextsUnknown()throws Exception{
         var f=fixture(root,"verifier-only",false,false);verifier(f.kit().resolve("second-verifier.jar"),true);Files.writeString(f.classpath(),"No launch evidence supplied\n");
         var a=assess(f);var p=RequiredCompatibilityIntegrationTest.required(a);
-        assertEquals(Resolution.COMPATIBLE,context(p,ExecutionContext.CURRENT_NODE_RUNTIME).resolution());assertEquals(Resolution.COMPATIBLE,context(p,ExecutionContext.TARGET_NODE_RUNTIME).resolution());assertEquals(Resolution.UNKNOWN,context(p,ExecutionContext.TARGET_VERIFIER).resolution());assertEquals("UNKNOWN",a.status());
+        assertEquals(Resolution.COMPATIBLE,context(p,ExecutionContext.CURRENT_NODE_RUNTIME).resolution());assertEquals(Resolution.COMPATIBLE,context(p,ExecutionContext.TARGET_NODE_RUNTIME).resolution());assertEquals(Resolution.UNKNOWN,context(p,ExecutionContext.TARGET_VERIFIER).resolution());assertEquals("BLOCKED",a.status());assertTrue(a.findings().stream().anyMatch(x->x.id().equals("LP-DB-001")&&x.severity().equals("BLOCKED")));
     }
     @Test void broadPartialDoesNotDowngradeSuccessfulExactContexts()throws Exception{
         var f=fixture(root,"blocked",true,true);var a=assess(f);

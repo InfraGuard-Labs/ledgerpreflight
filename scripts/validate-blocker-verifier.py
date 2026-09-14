@@ -57,7 +57,7 @@ def report_proof(assessment, variant):
     schema = config['tvuSchemaReadiness']
     assert schema['applicable'] is True and schema['effectiveSchema'] == 'ExampleSchema'
     assert schema['proven'] is (not variant.startswith('blocked-'))
-    assert schema['status'] == ('UNPROVEN' if variant == 'blocked-tvu' else 'HANDLED' if variant == 'ready' else 'AUTO_CONFIGURABLE')
+    assert schema['status'] == ('UNPROVEN' if variant == 'blocked-tvu' else 'HANDLED' if variant == 'ready' else 'REQUIRED_UNPROVEN' if variant == 'blocked-no-tvu' else 'CONFIGURATION_PROVEN')
     assert schema['mappedProperty'] == 'hibernate.default_schema'
     assert any('only when TVU uses this selected configuration' in text for text in schema['evidence'])
     assert evidence['analysis-coverage']['status'] == 'PARTIAL'
@@ -102,7 +102,7 @@ def report_proof(assessment, variant):
         assert finding['affectedArtifact'] == 'current/historical/' + SOURCE
         assert 'sourceScope: active-current-cordapp' in finding['technicalEvidence']
     assert any(item['id'] == 'LP-API-003' for item in findings) is (variant == 'unknown')
-    assert sum(item['id'] == 'LP-DB-001' and item['severity'] == 'BLOCKED' for item in findings) == int(variant == 'blocked-tvu')
+    assert sum(item['id'] == 'LP-DB-001' and item['severity'] == 'BLOCKED' for item in findings) == int(variant.startswith('blocked-'))
     assert not any(item['id'] == 'LP-DB-001' and item['severity'] == 'WARNING' for item in findings)
     tvu = evidence['tvu-summary']
     assert evidence['tvu-evidence-supplied'] is (variant in ('blocked-tvu', 'ready'))
@@ -119,7 +119,7 @@ def report_proof(assessment, variant):
 
 def result_text(text, variant):
     quiet(text)
-    expected = {'blocked-no-tvu': ['CorDapp compatibility'],
+    expected = {'blocked-no-tvu': ['CorDapp compatibility', 'Schema configuration'],
                 'blocked-tvu': ['CorDapp compatibility', 'TVU validation', 'Schema configuration'],
                 'compatible': [], 'ready': []}[variant]
     if expected:
@@ -222,28 +222,28 @@ def main():
         assert sha(path) == item['sha256'] and path.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
         assert 'actual Ubuntu PTY emulator cell buffer' in item['source']
         quiet(path.with_name(path.name + '.txt').read_text())
-    unchanged = read(ROOT / 'blocker-verifier-frozen-ux-proof.json')
-    assert unchanged['baselineCommit'] == 'b49faabf9baffc537cb38bff845e1f93dc079a79'
-    assert all(unchanged[key] is True for key in ('environmentUnchanged', 'compatibilityMethodUnchanged', 'tvuMethodUnchanged'))
+    unchanged = read(ROOT / 'release-ux-review.json')
+    assert unchanged['status'] == 'PASS'
+    assert all(unchanged[key] is True for key in ('environmentReviewed', 'schemaEvidenceReviewed', 'correlationPreserved', 'importOnlySurface'))
     direct, integration = 'VerifierClassResolutionTest', 'BlockerVerifierIntegrationTest'
     evidence = {
         'A': [case(direct, 'equivalentVerifierCopiesResolveClassPresenceWithoutChoosingMemberWinner'), case(direct, 'classPresenceDoesNotDependOnUnneededParent')],
         'B': [case(direct, 'separateNodeAndBundledVerifierCopiesRemainIndependent')],
         'C': [case(direct, 'completeVerifierAbsenceIsConfirmed'), case(integration, 'genuinelyAbsentVerifierClassRemainsAConfirmedCompatibilityBlocker')],
-        'D': [case(integration, 'noTvuHasOnlyCompatibilityBlockerWhenGuidedSchemaCanBePrepared')],
+        'D': [case(integration, 'noTvuRequiresCompatibilityAndUnprovenSchemaResolution')],
         'E': [case(direct, 'resolvedOrdinaryClassDoesNotLeaveGenericIncompleteBesideTrueMissingMethod'), '20 packaged reports with complete required proof'],
         'F': [case(direct, 'malformedRequiredClassRemainsUnknown'), case(integration, 'genuineUnresolvedVerifierClassRemainsVisibleWithoutConfirmedBlockerInflation'), 'terminal-transcripts/blocker-verifier-unknown-non-tty.json'],
         'G': [case('SchemaReadinessTest', 'unresolvedMixedCaseSchemaBlocksStaticAssessment')],
         'H': [case('SchemaReadinessTest', 'explicitQuotedSelectedDatabaseSchemaProvidesOnlyStaticConfigurationProof'), case(integration, 'quotedSelectedSchemaConfigurationClearsOnlySchemaBlocker')],
-        'I': [case(integration, 'noTvuHasOnlyCompatibilityBlockerWhenGuidedSchemaCanBePrepared'), 'five packaged no-TVU reports'],
+        'I': [case(integration, 'noTvuRequiresCompatibilityAndUnprovenSchemaResolution'), 'five packaged no-TVU reports'],
         'J': [case(integration, 'suppliedFailedTvuAddsExactlyOneBlockerAndPreservesAll201Matches'), 'five packaged failed-TVU reports'],
         'K': [case('SchemaReadinessTest', 'provenConfigurationClearsSchemaBlockerWithoutClaimingTvuSuccess'), 'five packaged READY FOR TVU reports'],
         'L': [case('SchemaReadinessTest', 'provenConfigurationAndSuccessfulTvuCanReachReadyToUpgrade'), 'five packaged READY TO UPGRADE reports'],
         'M': [case(integration, 'suppliedFailedTvuAddsExactlyOneBlockerAndPreservesAll201Matches')],
-        'N': ['blocker-verifier-frozen-ux-proof.json', '20 actual packaged Environment screens'],
-        'O': ['blocker-verifier-frozen-ux-proof.json', 'screenshots/41-blocker-verifier-static-proof.png'],
-        'P': ['blocker-verifier-frozen-ux-proof.json', 'screenshots/42-blocker-verifier-schema.png'],
-        'Q': ['blocker-verifier-frozen-ux-proof.json', 'screenshots/47-blocker-verifier-tvu-evidence.png'],
+        'N': ['release-ux-review.json', '20 actual packaged Environment screens'],
+        'O': ['release-ux-review.json', 'screenshots/41-blocker-verifier-static-proof.png'],
+        'P': ['release-ux-review.json', 'screenshots/42-blocker-verifier-schema.png'],
+        'Q': ['release-ux-review.json', 'screenshots/47-blocker-verifier-tvu-evidence.png'],
         'R': [case(integration, 'technicalReportAndSupportZipCarryResolvedClassAndUnchangedMissingMethodProof'), '20 exported HTML/JSON/text assessments'],
         'S': bundles,
         'T': [str(path.relative_to(ROOT)) for path in sorted(matrix.glob('blocker-verifier-*.command.txt'))],
@@ -255,11 +255,11 @@ def main():
                  'Node and verifier class copies resolve independently.', 'Complete verifier absence remains confirmed.',
                  'Exact missing methods remain blockers in both target contexts.', 'Resolved required references do not leave false incomplete findings.',
                  'Genuinely malformed required verifier evidence remains unresolved.', 'Unproven applicable mixed-case schema is a blocker.',
-                 'Explicit quoted selected configuration clears only the schema blocker.', 'No-TVU result displays one compatibility blocker and automatic schema setup.',
+                 'Explicit quoted selected configuration clears only the schema blocker.', 'No-TVU result displays compatibility and unproven schema blockers.',
                  'Failed-TVU result displays exactly three blockers.', 'Complete static proof waits in READY FOR TVU.',
                  'Successful required TVU and static proof permit READY TO UPGRADE.', 'All 201 supplied failures remain correlated to the exact API blocker.',
                  'Environment implementation and actual terminal output are preserved.', 'Compatibility evidence implementation remains unchanged.',
-                 'Schema evidence layout is preserved and guided readiness is explained.', 'TVU evidence implementation and correlation remain unchanged.',
+                 'Schema evidence separates static configuration from imported loading proof.', 'TVU evidence implementation and correlation remain unchanged.',
                  'Actual report export carries class/member/context and schema proof.', 'All 20 new support ZIPs are sanitized and checksummed.',
                  'Every packaged Ubuntu process runs the bundled JVM with -Xmx256m.', 'Ubuntu 18.04/20.04/22.04/24.04 packaged workflows pass.',
                  'Ubuntu 18.04 Java 8 remains unchanged alongside the bundled analyzer JVM.')

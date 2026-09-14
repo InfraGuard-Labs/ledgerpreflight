@@ -45,6 +45,7 @@ def quiet(text):
     for forbidden in ('C:\\Users', 'LP-API', 'LP-INPUT', 'LP-ANALYSIS', 'Ljava/', 'CURRENT_NODE_RUNTIME',
                       'TARGET_NODE_RUNTIME', 'TARGET_VERIFIER', 'currentInventory', 'targetInventory',
                       'View technical evidence', 'View full technical report', 'REQUIRED_OR_UNRESOLVED',
+                      'Run TVU safely', 'Run TVU again', 'Exact execution command', 'TVU SETUP FAILURE',
                       'Analyzer:', 'SyntheticPasswordOnly42', 'OutOfMemoryError', 'Exception in thread'):
         assert forbidden not in text, forbidden
     assert not re.search(r'\d+ warnings', text)
@@ -218,8 +219,8 @@ for variant in checks.VARIANTS:
                 assert term in terminal.display(), term
             terminal.capture('46-blocker-verifier-tvu-result.png', 'Three blockers with all 201 TVU failures correlated')
         else:
-            assert '1 blocker' in terminal.display() and 'Schema setup' in terminal.display() and 'View TVU evidence' not in terminal.display()
-            terminal.capture('40-blocker-verifier-static-result.png', 'One compatibility blocker with guided schema preparation available')
+            assert '2 blockers' in terminal.display() and 'Schema configuration' in terminal.display() and 'View TVU evidence' not in terminal.display()
+            terminal.capture('40-blocker-verifier-static-result.png', 'Compatibility and unproven schema configuration blockers')
         terminal.action('View compatibility evidence')
         terminal.menu()
         for term in ('example-old-contract.jar', 'org.example.runtime.Amounts.total(Iterable)', 'Current runtime', 'Target runtime', 'Target verifier', 'Method found', 'Method missing'):

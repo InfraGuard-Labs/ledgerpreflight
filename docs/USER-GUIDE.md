@@ -65,7 +65,7 @@ ledger-preflight assess --node /safe/current-node --upgrade-kit /safe/upgrade-ki
 
 In Docker, mount that evidence read-only and use its container path. Multiple `--tvu-results` arguments are accepted. Logs and error ZIPs from one validation run belong together. Avoid mixing runs, especially successful summaries and older failures.
 
-The workflow is: official guide → prepare kit → assess → resolve findings → required TVU → reassess with evidence → continue official upgrade procedure → lower-environment testing → production change process. Static assessment does not execute TVU. An optional interactive action can run approved TVU on an isolated copy; no migration, shutdown or production change is performed.
+The workflow is: official guide → prepare kit → assess → resolve findings → required TVU → reassess with evidence → continue official upgrade procedure → lower-environment testing → production change process. LedgerPreflight v0.1.0 never executes TVU. Run TVU separately using the official procedure and import the resulting evidence; no migration, shutdown or production change is performed by this tool.
 
 The normal result screen uses NOT READY TO UPGRADE for blockers, incomplete evidence and required warning reviews. JSON keeps these causes distinct.
 

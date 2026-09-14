@@ -45,6 +45,7 @@ def quiet(text):
     for forbidden in ('C:\\Users', 'LP-API', 'LP-INPUT', 'LP-ANALYSIS', 'Ljava/', 'CURRENT_NODE_RUNTIME',
                       'TARGET_NODE_RUNTIME', 'TARGET_VERIFIER', 'currentInventory', 'targetInventory',
                       'View technical evidence', 'View full technical report', 'REQUIRED_OR_UNRESOLVED',
+                      'Run TVU safely', 'Run TVU again', 'Exact execution command', 'TVU SETUP FAILURE',
                       'Analyzer:', 'SyntheticPasswordOnly42', 'OutOfMemoryError', 'Exception in thread'):
         assert forbidden not in text, forbidden
     assert not re.search(r'\d+ warnings', text)

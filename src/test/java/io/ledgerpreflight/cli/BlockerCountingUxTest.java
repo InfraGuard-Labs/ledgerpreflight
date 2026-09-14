@@ -21,7 +21,7 @@ class BlockerCountingUxTest {
         Assessment assessment=assessment(List.of(api(),schema()),false);String text=ProductView.result(assessment);
         assertEquals("BLOCKED",assessment.status());assertTrue(text.contains("2 blockers"));assertEquals(2,numbered(text));
         assertTrue(text.contains("1. CorDapp compatibility"));assertTrue(text.contains("2. Schema configuration"));
-        assertTrue(text.contains("required TVU schema configuration is not proven"));assertTrue(text.contains("Resolve both blockers, then run TVU."));
+        assertTrue(text.contains("required TVU schema configuration is not proven"));assertTrue(text.contains("Resolve both blockers, then run TVU separately and import the results."));
         assertFalse(text.contains("Compatibility analysis incomplete"));assertFalse(text.contains("! Schema configuration"));
         assertEquals(List.of("Import existing TVU results","View compatibility evidence","View schema evidence","Export full technical report","Create R3 support package","Exit"),actions(assessment));
     }
@@ -39,15 +39,15 @@ class BlockerCountingUxTest {
     }
     @Test void unresolvedContextOfKnownBlockerDoesNotCountThatBlockerTwice(){
         Finding partial=finding("LP-API-001","BLOCKED","API_COMPATIBILITY","blockedContexts: TARGET_NODE_RUNTIME","unknownContexts: TARGET_VERIFIER");
-        String text=ProductView.result(assessment(List.of(partial),false));assertTrue(text.contains("1 blocker · 1 unresolved review"));assertEquals(1,numbered(text));
-        assertTrue(text.contains("? Compatibility analysis incomplete"));
+        String text=ProductView.result(assessment(List.of(partial),false));assertTrue(text.contains("1 blocker"));assertFalse(text.contains("unresolved review"));assertEquals(1,numbered(text));
+        assertFalse(text.contains("? Compatibility analysis incomplete"));
     }
-    @Test void everyCountedBlockerRemainsVisibleBeyondTheDetailedLimit(){
+    @Test void largeResultsLinkToRemainingBlockersWithoutDumpingEveryGroup(){
         List<Finding> findings=List.of(api(),schema(),finding("LP-TVU-002","BLOCKED","TVU"),finding("LP-JAVA-002","BLOCKED","JAVA"),finding("LP-ENV-001","BLOCKED","CONFIGURATION"),finding("USR-PREP-1","BLOCKED","UPGRADE_PATH"));
-        String text=ProductView.result(assessment(findings,true));assertTrue(text.contains("6 blockers"));assertEquals(6,numbered(text));
-        for(String title:List.of("CorDapp compatibility","TVU validation","Schema configuration","Target Java","Environment configuration","Upgrade preparation"))assertTrue(text.contains(title),title);
+        String text=ProductView.result(assessment(findings,true));assertTrue(text.contains("6 blockers"));assertEquals(3,numbered(text));
+        for(String title:List.of("CorDapp compatibility","TVU validation","Schema configuration"))assertTrue(text.contains(title),title);
         assertEquals(3,Pattern.compile("WHAT HAPPENED").matcher(text).results().count());
-        assertFalse(text.contains("Additional issues are explained"));assertTrue(text.contains("Resolve all 6 blockers"));
+        assertTrue(text.contains("Additional issues are explained"));assertTrue(text.contains("Resolve all 6 blockers"));
     }
     @Test void resolvedInformationAndWarningsDoNotIncreaseBlockerCount(){
         List<Finding> findings=List.of(api(),finding("LP-DB-001","INFO","DATABASE_SCHEMA"),finding("LP-MAP-001","WARNING","CONFIGURATION"));

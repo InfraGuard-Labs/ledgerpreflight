@@ -83,12 +83,12 @@ for variant in blocked-no-tvu blocked-tvu compatible ready; do
   file=$out.ansi
   command="$app assess --node $base/node --upgrade-kit $base/kit --host-environment $base/host.json --verifier-classpath $base/classpath.txt --network-mode all-4.12 --output $out"
   if [ "$variant" = compatible ]; then
-    first='> Run TVU safely';export_keys=jjj;support_keys=jjjj;expected_exit=1;expected_status='READY FOR TVU';schema=ExampleSchema
+    first='> Import existing TVU results';export_keys=jj;support_keys=jjj;expected_exit=1;expected_status='READY FOR TVU';schema=ExampleSchema
   elif [ "$variant" = ready ]; then
     first='> View TVU evidence';export_keys=jj;support_keys=jjj;expected_exit=0;expected_status='READY TO UPGRADE';schema=ExampleSchema
   else
     if [ "$variant" = blocked-no-tvu ]; then
-      first='> Run TVU safely';compatibility_keys=jj;schema_keys=jjj;export_keys=jjjj;support_keys=jjjjj
+      first='> Import existing TVU results';compatibility_keys=j;schema_keys=jj;export_keys=jjj;support_keys=jjjj
     else
       first='> View compatibility evidence';compatibility_keys='';schema_keys=jj;export_keys=jjj;support_keys=jjjj
     fi
@@ -115,12 +115,12 @@ for variant in blocked-no-tvu blocked-tvu compatible ready; do
       grep -qF "$expected" "$file"
     done
     if [ "$variant" = blocked-tvu ]; then for term in '650 processed' '449 passed' '201 failed' '201 supplied failures match' 'TVU EVIDENCE'; do grep -qF "$term" "$file"; done; fi
-    if [ "$variant" = blocked-tvu ]; then grep -qF '3 blockers' "$file"; else grep -qF '1 blocker' "$file";grep -qF 'Schema setup' "$file"; fi
+    if [ "$variant" = blocked-tvu ]; then grep -qF '3 blockers' "$file"; else grep -qF '2 blockers' "$file";grep -qF 'Schema configuration' "$file"; fi
     if grep -Eq 'example-new-contract.jar|companion-tool.jar|external-verifier.jar|renamed-runtime.bin|Class missing' "$out.compatibility.ansi"; then exit 1; fi
   fi
   if [ "$variant" != blocked-tvu ] && [ "$variant" != ready ]; then if grep -Eq 'View TVU evidence|650 processed|201 failed|Transactions processed' "$file"; then exit 1; fi; fi
   grep -qF "$hide" "$file";grep -qF "$show" "$file"
-  if grep -Eq 'OutOfMemoryError|Exception in thread|Compatibility analysis incomplete|View technical evidence|View full technical report|currentInventory|LP-API|LP-DB|LP-INPUT|LP-ANALYSIS|Ljava/|CURRENT_NODE_RUNTIME|TARGET_NODE_RUNTIME|TARGET_VERIFIER|[0-9]+ warnings|PublicFacade|SourceHelpers|TargetHelpers|OrdinaryType|issues need attention|issue needs attention' "$file"; then
+  if grep -Eq 'Run TVU safely|Run TVU again|Exact execution command|OutOfMemoryError|Exception in thread|Compatibility analysis incomplete|View technical evidence|View full technical report|currentInventory|LP-API|LP-DB|LP-INPUT|LP-ANALYSIS|Ljava/|CURRENT_NODE_RUNTIME|TARGET_NODE_RUNTIME|TARGET_VERIFIER|[0-9]+ warnings|PublicFacade|SourceHelpers|TargetHelpers|OrdinaryType|issues need attention|issue needs attention' "$file"; then
     printf 'Unexpected diagnostics, unresolved context, or invented TVU result\n' >&2
     exit 1
   fi

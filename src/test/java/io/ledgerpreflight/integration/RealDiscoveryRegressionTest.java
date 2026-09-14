@@ -71,10 +71,10 @@ public class RealDiscoveryRegressionTest {
     }
     @Test void assessmentPreservesIdentityAndAutomaticMixedCaseReadiness()throws Exception {
         var f=fixture(root);var a=new AssessmentService().assess(f.options(false));assertEquals("4.11.6",a.sourceVersion());assertEquals("4.12.11",a.targetVersion());
-        assertFalse(a.findings().stream().anyMatch(x->x.id().equals("LP-DB-001")));
+        assertTrue(a.findings().stream().anyMatch(x->x.id().equals("LP-DB-001")&&x.severity().equals("BLOCKED")));
         var config=(ConfigAnalyzer.ConfigEvidence)a.evidence().get("schema-analysis");
         assertTrue(config.mixedCase());
-        assertEquals("AUTO_CONFIGURABLE",ProductView.schemaSetupStatus(a));
+        assertEquals("REQUIRED_UNPROVEN",ProductView.schemaSetupStatus(a));
         assertEquals("ExampleIssuer",((Map<?,?>)a.evidence().get("environment")).get("nodeName"));
         assertEquals(2,((List<?>)a.evidence().get("cordapps-current")).size());assertEquals(2,((List<?>)a.evidence().get("cordapps-target")).size());
     }

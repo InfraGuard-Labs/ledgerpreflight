@@ -8,32 +8,9 @@ import java.util.*;
 /** Explanations and comparisons retain evidence identity, rather than comparing rule IDs alone. */
 public final class AssessmentInsights {
     private AssessmentInsights(){}
-    static boolean hasTvuArtifact(Assessment assessment) {
-        long found=0;for(JsonNode artifact:Reports.JSON.valueToTree(assessment.evidence().get("upgrade-kit")))if(artifact.path("role").asText().equals("TVU"))found++;
-        return found==1;
-    }
-    static boolean hasTvuSchemaSetup(Assessment assessment) {
+    static boolean hasSchemaEvidence(Assessment assessment) {
         JsonNode schema=Reports.JSON.valueToTree(assessment.evidence().get("schema-analysis")).path("safeSettings").path("tvuSchemaReadiness");
-        return schema.path("applicable").asBoolean()||Set.of("AUTO_CONFIGURABLE","HANDLED","REQUIRED_UNPROVEN").contains(schema.path("status").asText());
-    }
-    static String guidedSafety(GuidedTvuExecution.Plan plan) {
-        StringBuilder text=new StringBuilder("RUN TVU SAFELY\n────────────────────────────────────────\n\nTarget\nCorda "+plan.targetVersion()+"\n\nTVU\nFound · "+plan.tvuVersion()+"\n\nTarget CorDapps\n"+plan.targetCordapps()+" found\n\nDatabase\n"+plan.databaseTarget()+"\n\nSchema\n"+plan.schema()+"\n\nTVU schema setup\n"+(plan.schemaAutomatic()?"Will be configured automatically":"No automatic schema override is required")+"\n");
-        for(String warning:plan.warnings())text.append("\n! ").append(warning).append('\n');
-        text.append("\nDatabase safety\nTVU needs historical transactions from the node database.\nOnly confirm an isolated / non-production database copy.\nTVU may connect to and write to that confirmed database.\nYour source node and upgrade kit remain unchanged.\n");
-        text.append("\nExact execution command (no shell)\n").append(String.join(" ",plan.command().stream().map(AssessmentInsights::commandArgument).toList())).append('\n');
-        return text.toString();
-    }
-    private static String commandArgument(String value){return value.matches("[A-Za-z0-9_./:=,@+-]+")?value:"'"+value.replace("'","'\"'\"'")+"'";}
-    static String guidedProgress(GuidedTvuExecution.Progress progress) {
-        String processed=progress.processed()==null?"Not yet reported":progress.processed().toString();
-        if(progress.processed()!=null&&progress.expected()!=null)processed+=" / "+progress.expected();
-        long elapsed=Math.max(0,progress.elapsedSeconds());
-        return "Running TVU…\n────────────────────────────────────────\n\nTransactions processed  "+processed+
-            "\nFailures observed       "+(progress.failed()==null?"Not yet reported":progress.failed())+
-            "\nElapsed                 "+String.format(Locale.ROOT,"%02d:%02d:%02d",elapsed/3600,elapsed/60%60,elapsed%60)+"\nStatus                  In progress";
-    }
-    static String guidedOutcome(String failureKind) {
-        return switch(failureKind){case "SETUP_FAILURE"->"TVU setup failure";case "DATABASE_CONNECTION_FAILURE"->"TVU could not connect to the confirmed isolated database";case "EXECUTION_FAILURE"->"TVU exited before validation completed";case "TRANSACTION_VERIFICATION_FAILURE"->"Historical transaction verification failed";case "USER_CANCELLATION"->"TVU run cancelled; partial evidence saved";default->"TVU completed";};
+        return schema.path("applicable").asBoolean()||Set.of("HANDLED","REQUIRED_UNPROVEN").contains(schema.path("status").asText());
     }
     public static List<Finding> blockers(Assessment a){return a.findings().stream().filter(f->Set.of("BLOCKED","ERROR").contains(f.severity())).toList();}
     public static String summary(Assessment a) {
@@ -121,7 +98,7 @@ public final class AssessmentInsights {
         if(categories.stream().anyMatch(Set.of("API_COMPATIBILITY","INTERNAL_API","LEGACY_JARS","CORDAPP","SIGNING","DEPENDENCY")::contains))steps.add("Resolve missing API requirements and target CorDapp dependencies together. Then verify the actual verifier class sources: a shadowed legacy shim cannot repair the selected runtime class. Recheck signing continuity after replacing CorDapps.");
         if(categories.contains("DATABASE_SCHEMA")||categories.contains("CONFIGURATION"))steps.add("On the validation database copy, reconcile schema, quoting and search_path with TVU configuration. This must precede TVU so configuration failures do not obscure linkage failures.");
         steps.add("Rerun static assessment after the artifact/configuration fixes. Resolve remaining blockers and unknown evidence before relying on validation results.");
-        steps.add("Run the complete required TVU against the prepared copy; import all summary and failure evidence from that single run. Previous-target TVU evidence cannot establish readiness for a new target.");
+        steps.add("Follow the official Corda procedure to run TVU separately against the prepared copy; import all summary and failure evidence from that single run. Previous-target TVU evidence cannot establish readiness for a new target.");
         steps.add("Continue the official R3 upgrade procedure and change approval only when required TVU passes and the assessment is READY TO UPGRADE.");
         StringBuilder s=new StringBuilder("ORDERED REMEDIATION PLAN\n");for(int i=0;i<steps.size();i++)s.append(i+1).append(". ").append(steps.get(i)).append("\n\n");return s.toString();
     }

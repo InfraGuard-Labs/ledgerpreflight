@@ -10,7 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** An applied file is not proof that the selected TVU run loaded the intended schema. */
-class IndependentGuidedSchemaEvidenceTest {
+class IndependentImportedSchemaEvidenceTest {
     @TempDir Path root;
     private static final String LOADED="HHH000205: Loaded properties from resource hibernate.properties: {hibernate.default_schema=\"ExampleSchema\"}\n";
     private TvuSchemaEvidence.Proof proof(String text)throws Exception {Path log=root.resolve("validator.log");Files.writeString(log,text);return TvuSchemaEvidence.analyze(List.of(log),"ExampleSchema");}
@@ -39,18 +39,6 @@ class IndependentGuidedSchemaEvidenceTest {
     }
     @Test void symlinkedSchemaEvidenceIsRejectedWithoutFollowingIt()throws Exception {
         Path outside=root.resolve("source.log");Files.writeString(outside,LOADED);Path link=root.resolve("validator.log");Files.createSymbolicLink(link,outside);assertThrows(IOException.class,()->TvuSchemaEvidence.analyze(List.of(link),"ExampleSchema"));
-    }
-    @Test void unrelatedIdentitySubstitutionDoesNotBreakKnownSchemaPreparation()throws Exception {
-        Path conf=root.resolve("node.conf");Files.writeString(conf,"database.schema=ExampleSchema\ndataSource.url=\"jdbc:postgresql://database.example/copy?currentSchema=ExampleSchema\"\nmyLegalName=${UNSET_SYNTHETIC_LEGAL_NAME}\n");
-        var c=new ConfigAnalyzer().analyze(conf);assertEquals("CONFIGURED",c.safeSettings().get("schemaResolution"));assertTrue(ConfigAnalyzer.canPrepareTvuSchema(c,"4.12.11"));
-    }
-    @Test void explicitSchemaCannotOverrideAKnownPrimaryOrInventAnUnknownCandidate()throws Exception {
-        Path conf=root.resolve("node.conf");Files.writeString(conf,"database.schema=ExampleSchema\ndataSource.url=\"jdbc:postgresql://database.example/copy?currentSchema=ExampleSchema,SharedSchema\"\n");
-        var c=new ConfigAnalyzer().analyze(conf);assertEquals("ExampleSchema",ConfigAnalyzer.selectTvuSchema(c,null));assertThrows(IOException.class,()->ConfigAnalyzer.selectTvuSchema(c,"SharedSchema"));assertThrows(IOException.class,()->ConfigAnalyzer.selectTvuSchema(c,"InventedSchema"));
-    }
-    @Test void decodedJdbcUserInfoCredentialIsRedactedFromUnlabelledDiagnostics()throws Exception {
-        Path conf=root.resolve("node.conf");Files.writeString(conf,"database.schema=ExampleSchema\ndataSource.url=\"jdbc:postgresql://operator:Synthetic%40Credential42@database.example/copy?currentSchema=ExampleSchema\"\n");
-        var c=TvuConfiguration.read(conf);assertFalse(c.redact("Driver rejected Synthetic@Credential42 and Synthetic%40Credential42").contains("Credential42"));assertFalse(c.databaseTarget().contains("Credential42"));
     }
     private static byte[] archive(String name,String text)throws IOException {var bytes=new ByteArrayOutputStream();try(ZipOutputStream zip=new ZipOutputStream(bytes)){zip.putNextEntry(new ZipEntry(name));zip.write(text.getBytes(StandardCharsets.UTF_8));zip.closeEntry();}return bytes.toByteArray();}
 }

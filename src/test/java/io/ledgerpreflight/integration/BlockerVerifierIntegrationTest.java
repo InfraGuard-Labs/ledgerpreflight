@@ -34,10 +34,10 @@ class BlockerVerifierIntegrationTest {
         for(var c:p.contexts())if(c.context()!=ExecutionContext.CURRENT_NODE_RUNTIME){assertEquals(Resolution.MISSING_METHOD,c.resolution());assertEquals("found",c.proof().classStatus());assertEquals("absent",c.proof().memberStatus());}
         assertEquals(1,a.findings().stream().filter(f->f.category().equals("API_COMPATIBILITY")&&f.severity().equals("BLOCKED")).count());
     }
-    @Test void noTvuHasOnlyCompatibilityBlockerWhenGuidedSchemaCanBePrepared()throws Exception{
+    @Test void noTvuRequiresCompatibilityAndUnprovenSchemaResolution()throws Exception{
         var f=BlockerVerifierFixtureFactory.create(root,"blocked",true);var a=assess(f,false);resolved(a);missingMethod(a);
-        assertEquals("BLOCKED",a.status());assertEquals(List.of("CorDapp compatibility"),ProductView.issues(a).stream().filter(ProductView.Issue::blocking).map(ProductView.Issue::title).toList());
-        String result=ProductView.result(a);assertTrue(result.contains("1 blocker"));assertTrue(result.contains("1. CorDapp compatibility"));assertTrue(result.contains("Schema setup"));assertFalse(result.contains("issues need attention"));assertFalse(result.contains("TVU validation"));
+        assertEquals("BLOCKED",a.status());assertEquals(List.of("CorDapp compatibility","Schema configuration"),ProductView.issues(a).stream().filter(ProductView.Issue::blocking).map(ProductView.Issue::title).toList());
+        String result=ProductView.result(a);assertTrue(result.contains("2 blockers"));assertTrue(result.contains("1. CorDapp compatibility"));assertTrue(result.contains("2. Schema configuration"));assertFalse(result.contains("issues need attention"));assertFalse(result.contains("TVU validation"));
         assertEquals(Boolean.FALSE,a.evidence().get("tvu-evidence-supplied"));assertEquals("PARTIAL",((Map<?,?>)a.evidence().get("analysis-coverage")).get("status"));
     }
     @Test void suppliedFailedTvuAddsExactlyOneBlockerAndPreservesAll201Matches()throws Exception{
@@ -67,7 +67,7 @@ class BlockerVerifierIntegrationTest {
     @Test void malformedClassPlusConfirmedBlockersAddsReviewWithoutChangingBlockerCount()throws Exception{
         var f=BlockerVerifierFixtureFactory.create(root,"blocked",false);
         SyntheticFixtureFactory.writeZip(f.node().resolve("cordapps/incomplete-contract.jar"),Map.of("META-INF/MANIFEST.MF",SyntheticFixtureFactory.manifest(Map.of("Cordapp-Contract-Name","Incomplete synthetic contract","Cordapp-Contract-Version","1")),"org/example/ledger/Uninspectable.class",new byte[]{0,1,2}));
-        var a=assess(f,false);missingMethod(a);assertEquals("BLOCKED",a.status());assertTrue(ProductView.result(a).contains("Compatibility analysis incomplete"));assertEquals(1,ProductView.issues(a).stream().filter(ProductView.Issue::blocking).count());assertTrue(ProductView.result(a).contains("1 blocker"));
+        var a=assess(f,false);missingMethod(a);assertEquals("BLOCKED",a.status());assertTrue(ProductView.result(a).contains("Compatibility analysis incomplete"));assertEquals(2,ProductView.issues(a).stream().filter(ProductView.Issue::blocking).count());assertTrue(ProductView.result(a).contains("2 blockers"));
     }
     @Test void technicalReportAndSupportZipCarryResolvedClassAndUnchangedMissingMethodProof()throws Exception{
         var f=BlockerVerifierFixtureFactory.create(root,"blocked",false);var a=assess(f,true);resolved(a);missingMethod(a);var files=Reports.files(a);

@@ -43,32 +43,6 @@ public final class ConfigAnalyzer {
         proof.add("Configuration proof applies only when TVU uses this selected configuration; it does not prove physical database state, a different validation copy, or successful TVU execution");
         return new TvuSchemaReadiness(applicable,proven,proven?"CONFIGURATION_PROVEN":applicable?"REQUIRED_UNPROVEN":"NOT_APPLICABLE",source,primary,"hibernate.default_schema",Objects.toString(config.schema(),""),List.copyOf(proof));
     }
-    /** A known rule can be applied only in a private guided workspace, after database approval. */
-    public static boolean canPrepareTvuSchema(ConfigEvidence config,String targetVersion) {
-        if(!tvuSchemaReadiness(config,targetVersion).applicable()||config.contradictory())return false;
-        try{selectTvuSchema(config,null);return true;}catch(IOException ignored){return false;}
-    }
-    /** A manual selection is constrained to names already established by configuration evidence. */
-    public static String selectTvuSchema(ConfigEvidence config,String explicitSchema)throws IOException {
-        String primary=Objects.toString(config.safeSettings().get("primarySchema"),"");
-        boolean configured="CONFIGURED".equals(config.safeSettings().get("schemaResolution"));
-        String chosen=explicitSchema==null||explicitSchema.isBlank()?null:explicitSchema;
-        if(chosen==null){
-            if(!configured||primary.isBlank())throw new IOException("Could not determine the effective schema. Select a schema from the discovered configuration.");
-            chosen=primary;
-        }else{
-            if(configured&&!primary.isBlank()&&!chosen.equals(primary))throw new IOException("The selected TVU schema differs from the established primary schema.");
-            Set<String> candidates=new LinkedHashSet<>();if(!primary.isBlank())candidates.add(primary);
-            for(String key:List.of("schemas","schemaDeclarations")){
-                Object value=config.safeSettings().get(key);
-                if(value instanceof Collection<?> values)for(Object item:values)if(item instanceof String name)candidates.add(name);
-            }
-            if(!candidates.contains(chosen))throw new IOException("The selected TVU schema is not established by the supplied configuration.");
-        }
-        if(chosen.isBlank()||chosen.length()>256||chosen.codePoints().anyMatch(Character::isISOControl))
-            throw new IOException("The effective schema cannot be safely represented in TVU configuration.");
-        return chosen;
-    }
     public static String quotedTvuSchema(String schema)throws IOException {
         if(schema==null||schema.isBlank()||schema.length()>256||schema.codePoints().anyMatch(Character::isISOControl))
             throw new IOException("The effective schema cannot be safely represented in TVU configuration.");

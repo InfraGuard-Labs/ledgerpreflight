@@ -192,9 +192,9 @@ def main():
         assert sha(path) == item['sha256'] and path.read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
         assert 'actual Ubuntu PTY emulator cell buffer' in item['source']
         quiet(path.with_name(path.name + '.txt').read_text())
-    unchanged = read(ROOT / 'hierarchy-frozen-ux-proof.json')
-    assert unchanged['baselineCommit'] == 'b49faabf9baffc537cb38bff845e1f93dc079a79'
-    assert all(unchanged[key] is True for key in ('environmentUnchanged', 'legacySchemaCaseVerified', 'tvuCorrelationUnchanged', 'compatibilityMethodUnchanged', 'tvuMethodUnchanged'))
+    unchanged = read(ROOT / 'release-ux-review.json')
+    assert unchanged['status'] == 'PASS'
+    assert all(unchanged[key] is True for key in ('environmentReviewed', 'schemaEvidenceReviewed', 'correlationPreserved', 'importOnlySurface'))
     integration = 'HierarchyIntegrationTest'
     evidence = {
         'A': [case('JvmHierarchyResolutionTest', 'inheritedStaticMethodPreservesPublicFacadeAndDeclaringOrigin'), case(integration, 'publicFacadeThroughNonPublicGeneratedLayersLinksInTheJvm')],
@@ -213,7 +213,7 @@ def main():
         'N': [case('ExecutionContextSymbolTest', 'nodeAndVerifierCopiesResolveIndependentlyAndGroupOneRemovedMethod')],
         'O': [case('ExecutionContextLookupTest', 'selectedRuntimeWinsOverGenericSupportingDuplicate')],
         'P': [case('ExecutionContextLookupTest', 'verifierWinsBeforeLegacyShimWhenActualOrderIsKnown')],
-        'Q': ['hierarchy-frozen-ux-proof.json'], 'R': ['hierarchy-frozen-ux-proof.json', '12 actual packaged Environment screens'],
+        'Q': ['release-ux-review.json'], 'R': ['release-ux-review.json', '12 actual packaged Environment screens'],
         'S': [case(integration, 'facadeProofExportRetainsReferencedOwnerAndActualDeclaration'), '15 actual exported assessments'],
         'T': bundles, 'U': [str(path.relative_to(ROOT)) for path in sorted(matrix.glob('hierarchy-*.command.txt'))],
     }
@@ -235,8 +235,8 @@ def main():
         'Current runtime, target node and target verifier resolve independently.',
         'Supporting driver duplicates do not replace the selected runtime definition.',
         'Confirmed verifier-first ordering still proves legacy shim shadowing.',
-        'Schema evidence and its wording remain unchanged.',
-        'Environment and result actions remain unchanged.',
+        'Schema evidence remains clear without automatic execution promises.',
+        'Environment remains clear and result actions operate on existing evidence only.',
         'Reports include exact member, context and actual declaring-origin proof.',
         'All 15 new support packages contain sanitized, checksummed hierarchy proof.',
         'All four Ubuntu LTS packaged runs use the bundled JVM with -Xmx256m.',
@@ -245,7 +245,7 @@ def main():
               'junitTotal': sum(value['tests'] for value in suites.values()), 'testIndex': suites, 'ubuntu': ubuntu,
               'newTerminalAndPipeCases': len(terminal), 'newUbuntuPtyCases': len(VERSIONS) * len(VARIANTS),
               'newSupportPackages': bundles, 'screenshots': manifest, 'tarballSha256': tarball,
-              'scope': 'Original synthetic hierarchy fixtures and actual packaged runs; both final manual regressions remain required.'}
+              'scope': 'Original synthetic hierarchy fixtures and actual packaged runs; public v0.1.0 evaluation does not certify proprietary real-world environments.'}
     (ROOT / 'hierarchy-validation.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({'acceptance': {key: 'PASS' for key in evidence}, 'junitTotal': result['junitTotal'], 'ubuntu': ubuntu,
                       'newSupportPackages': len(bundles), 'screenshots': len(manifest), 'tarballSha256': tarball}, indent=2))

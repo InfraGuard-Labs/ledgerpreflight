@@ -32,15 +32,6 @@ class CoreBoundaryTest {
         var a=new Assessment("1","0.1.0","BLOCKED","4.11","4.12",List.of(blocker),Map.of("tvu-summary",tvu));
         assertEquals("PASS",((Map<?,?>)a.gates()).get("tvu"));assertEquals("REVIEW_REQUIRED",((Map<?,?>)a.gates()).get("static"));
     }
-    @Test void successfulCountersCannotOverrideIncompleteGuidedExecution(){
-        var tvu=new io.ledgerpreflight.evidence.TvuAnalyzer.TvuEvidence(650L,650L,650L,0L,0,Map.of(),false,true,true,List.of());
-        Map<String,Object> complete=new HashMap<>(Map.of("failureKind","NONE","exitCode",0,"cancelled",false,"workspaceCleaned",true));
-        assertEquals("PASS",((Map<?,?>)new Assessment("1","0.1.0","READY TO UPGRADE","4.11","4.12",List.of(),Map.of("tvu-summary",tvu,"tvu-run",complete)).gates()).get("tvu"));
-        for(var changed:List.of(Map.entry("failureKind",(Object)"EXECUTION_FAILURE"),Map.entry("exitCode",(Object)1),Map.entry("cancelled",(Object)true),Map.entry("workspaceCleaned",(Object)false),Map.entry("manifestWriteFailure",(Object)true))){
-            Map<String,Object> run=new HashMap<>(complete);run.put(changed.getKey(),changed.getValue());
-            assertEquals("REQUIRED_OR_UNRESOLVED",((Map<?,?>)new Assessment("1","0.1.0","UNKNOWN","4.11","4.12",List.of(),Map.of("tvu-summary",tvu,"tvu-run",run)).gates()).get("tvu"),changed.getKey());
-        }
-    }
     @Test void prereleaseQualifierIsPreserved(){
         var j=new JarInventory("corda.jar","hash",Map.of("Corda-Release-Version","4.12.11-RC1"),Map.of(),List.of());assertEquals("4.12.11-RC1",Discovery.version(j));
     }

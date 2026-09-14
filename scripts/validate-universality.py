@@ -28,12 +28,12 @@ kit=pathlib.Path('/tmp/arbitrary-kit');shutil.copytree(source/'upgrade-kit',kit)
 assess('nonstandard-artifact-names','/srv/apps/corda/issuer',kit=kit)
 # Mandatory sanitized acceptance gate: real manifest/content structures, no vendor binaries.
 acceptance=r/'synthetic/discovery-regression'
-a=assess('real-style-acceptance',acceptance/'current-node',kit=acceptance/'upgrade-kit',expected=4,env={**os.environ,'LP_HOST_JAVA_VERSION':'1.8.0_242'})
+a=assess('real-style-acceptance',acceptance/'current-node',kit=acceptance/'upgrade-kit',expected=2,env={**os.environ,'LP_HOST_JAVA_VERSION':'1.8.0_242'})
 # This metadata-only fixture intentionally omits the Contract/FlowLogic runtime APIs.
 # Discovery remains exact, but those required references must now remain UNKNOWN.
-assert a['status']=='UNKNOWN' and not a['evidence']['required-symbol-resolution']['complete']
-assert not any(f['severity']=='BLOCKED' for f in a['findings'])
-assert a['evidence']['schema-analysis']['safeSettings']['tvuSchemaReadiness']['status']=='AUTO_CONFIGURABLE'
+assert a['status']=='BLOCKED' and not a['evidence']['required-symbol-resolution']['complete']
+assert {f['id'] for f in a['findings'] if f['severity']=='BLOCKED'}=={'LP-DB-001'}
+assert a['evidence']['schema-analysis']['safeSettings']['tvuSchemaReadiness']['status']=='REQUIRED_UNPROVEN'
 assert {'net/corda/core/contracts/Contract','net/corda/core/flows/FlowLogic'} <= {s['symbol']['owner'] for s in a['evidence']['required-symbol-resolution']['symbols'] if s['resolution']=='UNKNOWN'}
 d=a['evidence']['discovery'];cfg=a['evidence']['schema-analysis']['safeSettings']
 assert (a['sourceVersion'],a['targetVersion'])==('4.11.6','4.12.11')

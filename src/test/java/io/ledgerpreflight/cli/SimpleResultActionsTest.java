@@ -15,22 +15,22 @@ class SimpleResultActionsTest {
     private List<String> actions(Assessment a){return InteractiveSession.actions(a).stream().map(x->x.label).toList();}
     @Test void compatibilitySchemaAndSuppliedTvuHaveExactlyTheRequestedActions()throws Exception{
         var f=ProductAcceptanceFixture.create(root,true,true);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,true));
-        assertEquals(List.of("View compatibility evidence","View TVU evidence","View schema evidence","Export full technical report","Create R3 support package","Run TVU again","Import existing TVU results","Exit"),actions(a));
+        assertEquals(List.of("View compatibility evidence","View TVU evidence","View schema evidence","Export full technical report","Create R3 support package","Import existing TVU results","Exit"),actions(a));
     }
     @Test void compatibilityOnlyDoesNotOfferSchemaOrTvu(){
         var f=Finding.of("LP-API-001","Missing method","BLOCKED","API_COMPATIBILITY","HIGH","RUNTIME_DISCOVERY","app.jar",List.of(),"Historical verification may fail","Use a compatible runtime");
         var a=new Assessment("1","0.1.0","BLOCKED","4.11.6","4.12.11",List.of(f),Map.of());
         assertEquals(List.of("Import existing TVU results","View compatibility evidence","Export full technical report","Create R3 support package","Exit"),actions(a));
     }
-    @Test void readyForTvuOffersGuidedExecutionWithoutInventingEvidence()throws Exception{
+    @Test void readyForTvuOffersImportWithoutInventingEvidence()throws Exception{
         var f=ProductAcceptanceFixture.create(root,false,false);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,false));
         assertEquals("READY FOR TVU",a.status());
-        assertEquals(List.of("Run TVU safely","Import existing TVU results","Export full technical report","Create R3 support package","Exit"),actions(a));
+        assertEquals(List.of("Import existing TVU results","Export full technical report","Create R3 support package","Exit"),actions(a));
     }
     @Test void readyToUpgradeShowsSuppliedTvuAndExportSupportActions()throws Exception{
         var f=ProductAcceptanceFixture.create(root,false,false);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,true));
         assertEquals("READY TO UPGRADE",a.status());
-        assertEquals(List.of("View TVU evidence","Export full technical report","Create R3 support package","Run TVU again","Import existing TVU results","Exit"),actions(a));
+        assertEquals(List.of("View TVU evidence","Export full technical report","Create R3 support package","Import existing TVU results","Exit"),actions(a));
     }
     @Test void threeEvidenceViewsAreHumanReadableAndPreserveCorrelationScope()throws Exception{
         var f=ProductAcceptanceFixture.create(root,true,true);var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,true));
@@ -71,7 +71,33 @@ class SimpleResultActionsTest {
         StringWriter output=new StringWriter();var options=DiscoverySession.prepare(ProductAcceptanceFixture.options(f,true),new SessionTerminal(new StringReader("3\n1\n"),new PrintWriter(output),false,100));
         assertNotNull(options);assertEquals("selected-runtime.bin",options.currentRuntime().getFileName().toString());assertTrue(output.toString().contains("Select active current Corda runtime"));
         var a=new AssessmentService().assess(options);ActiveRuntimeRegressionTest.assertActive(a);
-        StringWriter session=new StringWriter();new InteractiveSession(options,a,root.resolve("reports"),new SessionTerminal(new StringReader("7\n"+f.log()+"\n2\n"+f.errors()+"\n1\nq\n"),new PrintWriter(session),false,100)).run();
+        StringWriter session=new StringWriter();new InteractiveSession(options,a,root.resolve("reports"),new SessionTerminal(new StringReader("6\n"+f.log()+"\n2\n"+f.errors()+"\n1\nq\n"),new PrintWriter(session),false,100)).run();
         assertTrue(session.toString().contains("Assessment updated"));assertFalse(session.toString().contains("Corda unknown"));
+    }
+    @Test void explicitSchemaConfigurationDoesNotClaimTvuWasRun()throws Exception{
+        var f=BlockerVerifierFixtureFactory.create(root,"compatible",false);
+        var a=new AssessmentService().assess(ProductAcceptanceFixture.options(f,false));
+        assertEquals("READY FOR TVU",a.status());
+        String text=ResultEvidence.schema(a);
+        assertTrue(text.contains("explicitly names the intended schema"));
+        assertTrue(text.contains("TVU schema loading still needs validation"));
+        assertFalse(text.contains("The supplied TVU run loaded"));
+        assertFalse(text.contains("effective schema needs confirmation"));
+        assertTrue(text.contains("import the resulting logs"));
+    }
+    @Test void successfulImportedCountersDoNotApproveOtherUnresolvedAssessmentIssues()throws Exception{
+        Path log=root.resolve("successful-tvu.log");Files.writeString(log,"Total: 7\nProcessed: 7\nPassed: 7\nFailed: 0\n");
+        var tvu=new io.ledgerpreflight.evidence.TvuAnalyzer().analyze(List.of(log));assertTrue(tvu.completeSuccess());
+        for(String severity:List.of("BLOCKED","UNKNOWN","WARNING")){
+            var finding=Finding.of("LP-API-001","API requires review",severity,"API_COMPATIBILITY","HIGH","BYTECODE","example-contract.jar",List.of(),"Historical validation may fail","Review compatibility");
+            var findings=List.of(finding);var a=new Assessment("1","0.1.0",Assessment.readiness(findings,tvu.completeSuccess(),true),"4.11.6","4.12.11",findings,Map.of("tvu-summary",tvu));
+            assertEquals("NOT READY TO UPGRADE",ProductView.state(a));
+            String text=ResultEvidence.tvu(a);
+            assertTrue(text.contains("complete successful verification"));
+            assertTrue(text.contains("Resolve the remaining assessment issues before upgrading"));
+            assertFalse(text.contains("then follow the supported upgrade procedure"));
+        }
+        var ready=new Assessment("1","0.1.0",Assessment.readiness(List.of(),tvu.completeSuccess(),true),"4.11.6","4.12.11",List.of(),Map.of("tvu-summary",tvu));
+        assertTrue(ResultEvidence.tvu(ready).contains("then follow the supported upgrade procedure"));
     }
 }

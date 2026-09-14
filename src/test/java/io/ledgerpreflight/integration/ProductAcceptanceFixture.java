@@ -59,7 +59,7 @@ public final class ProductAcceptanceFixture {
     public static void generate(Path root)throws Exception {
         for(String kind:List.of("environment","blocked","clean")){
             boolean blocked=kind.equals("blocked"),multi=!kind.equals("clean");var f=create(root.resolve(kind),blocked,multi);var a=new AssessmentService().assess(options(f,blocked));assertIdentity(a,multi);
-            assertEquals(blocked?"BLOCKED":"READY FOR TVU",a.status());
+            assertEquals(blocked||multi?"BLOCKED":"READY FOR TVU",a.status());
             if(blocked){var t=(io.ledgerpreflight.evidence.TvuAnalyzer.TvuEvidence)a.evidence().get("tvu-summary");assertEquals(201,t.detailedRecords());assertTrue(ProductView.result(a).contains("201 supplied failures match"));assertTrue(a.findings().stream().anyMatch(x->x.id().equals("LP-LEGACY-001")&&x.severity().equals("BLOCKED")));}
             Reports.write(root.resolve(kind+"-asserted"),Reports.files(a));
             if(kind.equals("clean")){var ready=new AssessmentService().assess(options(f,true));assertIdentity(ready,false);assertEquals("READY TO UPGRADE",ready.status());Reports.write(root.resolve("ready-asserted"),Reports.files(ready));}

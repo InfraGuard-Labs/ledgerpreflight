@@ -24,7 +24,7 @@ def identity(a):
     assert d['currentCordappJars']==d['targetCordappJars']==2
     assert s['databaseVendor']=='PostgreSQL'
     assert any(j['role']=='TVU' for j in a['evidence']['upgrade-kit'])
-for name,kind,code,state,extra in [('environment','environment',1,'READY FOR TVU',()),('blocked','blocked',2,'BLOCKED',()),('ready-for-tvu','clean',1,'READY FOR TVU',()),('ready-to-upgrade','clean',0,'READY TO UPGRADE',('--tvu-results',fixture/'clean/tvu.log'))]:
+for name,kind,code,state,extra in [('environment','environment',2,'BLOCKED',()),('blocked','blocked',2,'BLOCKED',()),('ready-for-tvu','clean',1,'READY FOR TVU',()),('ready-to-upgrade','clean',0,'READY TO UPGRADE',('--tvu-results',fixture/'clean/tvu.log'))]:
     a,text=assess(name,kind,code,extra,json_output=False);identity(a);assert a['status']==state
     if kind=='blocked':
         tvu=a['evidence']['tvu-summary'];assert (tvu['expected'],tvu['processed'],tvu['succeeded'],tvu['failed'],tvu['detailedRecords'])==(650,650,449,201,201)
@@ -48,9 +48,9 @@ assert a['status']=='READY TO UPGRADE' and a['evidence']['tvu-summary']['complet
 assert a['evidence']['required-symbol-resolution']['complete']
 # Matching primary with additional ordered paths; contradictory defaults remain unresolved.
 for name,conf,expected in [
- ('matching-multiple','database.schema=Primary\nhibernate.default_schema=Primary\ndataSource.url="jdbc:postgresql://db.example/db?currentSchema=Primary,shared,reporting"',1),
+ ('matching-multiple','database.schema=Primary\nhibernate.default_schema=Primary\ndataSource.url="jdbc:postgresql://db.example/db?currentSchema=Primary,shared,reporting"',2),
  ('conflicting-primary','database.schema=Primary\ndataSource.url="jdbc:postgresql://db.example/db?currentSchema=Different,shared"',4),
- ('quoted-search-path','database.schema=Primary\nconnectionInitSql="SET search_path TO \\"Primary\\",SHARED"\ndataSource.url="jdbc:postgresql://db.example/db"',1),
+ ('quoted-search-path','database.schema=Primary\nconnectionInitSql="SET search_path TO \\"Primary\\",SHARED"\ndataSource.url="jdbc:postgresql://db.example/db"',2),
  ('unresolved-path','connectionInitSql="SET search_path TO $user,public"\ndataSource.url="jdbc:postgresql://db.example/db"',4)]:
     path=pathlib.Path('/tmp')/(name+'.conf');path.write_text(conf)
     a,_=assess(name,expected=expected,extra=['--node-conf',path])

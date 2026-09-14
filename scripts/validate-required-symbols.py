@@ -174,8 +174,8 @@ compatible = read(ROOT / 'synthetic/required-symbols/compatible-asserted/report.
 symbol(compatible, 'COMPATIBLE')
 # This exported fixture deliberately retains ExampleSchema for the environment UI;
 # the lowercase-schema readiness cases are independently asserted in integration tests.
-assert compatible['status'] == 'READY FOR TVU'
-assert not any(f['id'] == 'LP-DB-001' for f in compatible['findings'])
+assert compatible['status'] == 'BLOCKED'
+assert [f['id'] for f in compatible['findings'] if f['severity'] == 'BLOCKED'] == ['LP-DB-001']
 assert not any(f['category'] == 'API_COMPATIBILITY' and f['severity'] in ('BLOCKED', 'UNKNOWN') for f in compatible['findings'])
 assert 'Java8 unchanged' in (ROOT / 'linux-matrix/ubuntu-18.04-java8.validation.txt').read_text()
 
@@ -200,7 +200,7 @@ for filename in ('15-required-symbol-environment.png', '16-required-symbol-resul
     assert not any(noise in content for noise in ('LP-', 'Ljava/', 'currentInventory', 'View technical evidence', 'Compatibility analysis incomplete'))
     if filename.startswith('16-'):
         assert 'CorDapp compatibility' in content and 'View compatibility evidence' in content
-        assert 'View TVU evidence' not in content and 'Run TVU safely' in content
+        assert 'View TVU evidence' not in content and 'Import existing TVU results' in content
     if filename.startswith('17-'):
         assert 'example-old-contract.jar' in content and 'Class found' in content and 'Method found' in content and 'Method missing' in content
         assert 'example-new-contract.jar' not in content and 'assessment\n' not in content

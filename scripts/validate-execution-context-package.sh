@@ -69,9 +69,9 @@ for variant in blocked verifier-only compatible; do
   file=$out.ansi
   command="$app assess --node $base/node --upgrade-kit $base/kit --host-environment $base/host.json --verifier-classpath $base/classpath.txt --network-mode all-4.12 --output $out"
   if [ "$variant" = compatible ]; then
-    first='> Run TVU safely';export_keys=jj;support_keys=jjj;expected_exit=1;expected_status='READY FOR TVU';schema=example_issuer
+    first='> Import existing TVU results';export_keys=j;support_keys=jj;expected_exit=1;expected_status='READY FOR TVU';schema=example_issuer
   else
-    first='> Run TVU safely';compatibility_keys=jj;schema_keys=jjj;export_keys=jjjj;support_keys=jjjjj;expected_exit=2;expected_status=BLOCKED;schema=ExampleSchema
+    first='> Import existing TVU results';compatibility_keys=j;schema_keys=jj;export_keys=jjj;support_keys=jjjj;expected_exit=2;expected_status=BLOCKED;schema=ExampleSchema
   fi
   rm -f "$file"
   set +e
@@ -95,7 +95,7 @@ for variant in blocked verifier-only compatible; do
     if grep -Eq 'example-new-contract.jar|companion-tool.jar|external-verifier.jar|renamed-runtime.bin|Class missing' "$out.compatibility.ansi"; then exit 1; fi
   fi
   grep -qF "$hide" "$file";grep -qF "$show" "$file"
-  if grep -Eq 'OutOfMemoryError|Exception in thread|Compatibility analysis incomplete|View technical evidence|View full technical report|View TVU evidence|currentInventory|LP-API|LP-INPUT|LP-ANALYSIS|Ljava/|CURRENT_NODE_RUNTIME|TARGET_NODE_RUNTIME|TARGET_VERIFIER|[0-9]+ warnings|650 processed|201 failed|Transactions processed' "$file"; then
+  if grep -Eq 'Run TVU safely|Run TVU again|Exact execution command|OutOfMemoryError|Exception in thread|Compatibility analysis incomplete|View technical evidence|View full technical report|View TVU evidence|currentInventory|LP-API|LP-INPUT|LP-ANALYSIS|Ljava/|CURRENT_NODE_RUNTIME|TARGET_NODE_RUNTIME|TARGET_VERIFIER|[0-9]+ warnings|650 processed|201 failed|Transactions processed' "$file"; then
     printf 'Unexpected diagnostics, unresolved context, or invented TVU result\n' >&2
     exit 1
   fi

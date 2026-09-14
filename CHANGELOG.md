@@ -1,5 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.1.0
 
-Initial offline CLI, current/target discovery, exact JVM member compatibility, internal API and legacy duplicate analysis, HOCON schema checks, TVU correlation, versioned rules, deterministic reports and sanitized support bundles. Synthetic tests and Docker-only release validation accompany the distribution.
+Initial external-evaluation release of the standalone Linux Corda upgrade preflight and existing-TVU analysis CLI.
+
+- Discover current/target runtimes, platform versions, Java requirements and CorDapps.
+- Check exact runtime classes/members, relevant verifier contexts, internal API use and legacy duplicates.
+- Inspect HOCON database/schema declarations and imported schema-loading evidence.
+- Parse existing TVU logs/error ZIPs and correlate supplied detailed failures with compatibility findings.
+- Export technical reports and sanitized support evidence with checksums.
+- Bundle private Java 17 for Linux x86_64 without changing the node's Java installation.
+
+TVU execution is outside the v0.1.0 release interface and distribution. The tool performs no upgrade or database operation. Release checks use synthetic inputs and Docker-only development tools.

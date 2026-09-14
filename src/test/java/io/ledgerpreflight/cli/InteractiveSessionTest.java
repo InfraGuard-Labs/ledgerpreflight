@@ -2,7 +2,6 @@ package io.ledgerpreflight.cli;
 
 import io.ledgerpreflight.core.*;
 import io.ledgerpreflight.integration.SyntheticFixtureFactory;
-import io.ledgerpreflight.integration.GuidedTvuFixtureFactory;
 import io.ledgerpreflight.reporting.Reports;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,7 +41,7 @@ class InteractiveSessionTest {
         try(var paths=Files.list(root.resolve("reports"))){assertEquals(1,paths.filter(p->p.toString().endsWith(".zip")).count());}
     }
     @Test void interactiveImportProducesFreshAssessment()throws Exception {
-        assertTrue(session(true,"7\n"+root.resolve("fixture/tvu.log")+"\n2\n"+root.resolve("fixture/errors.zip")+"\n1\nq\n").contains("Assessment updated"));
+        assertTrue(session(true,"6\n"+root.resolve("fixture/tvu.log")+"\n2\n"+root.resolve("fixture/errors.zip")+"\n1\nq\n").contains("Assessment updated"));
         try(var paths=Files.list(root.resolve("reports"))){assertTrue(paths.anyMatch(p->p.getFileName().toString().startsWith("imported-tvu-")));}
     }
     @Test void comparisonDoesNotMergeDistinctMethodsUnderSameRule(){
@@ -62,41 +61,10 @@ class InteractiveSessionTest {
         assertEquals(1,cmd.execute("assess","--node",fixture.node().toString(),"--upgrade-kit",fixture.kit().toString(),"--output",root.resolve("json-report").toString(),"--json"));
         assertEquals("READY FOR TVU",Reports.JSON.readTree(out.toString()).path("status").asText());assertFalse(out.toString().contains("WHAT WOULD"));
     }
-    @Test void tvuRefusesMissingConsentBeforeAnyExecution() {
-        var plan=new TvuExecution.Plan(root,root.resolve("x.jar"),root.resolve("capture"),List.of("/does/not/exist"));
-        assertThrows(IOException.class,()->TvuExecution.run(plan,false,terminal("",new StringWriter()),1));assertFalse(Files.exists(plan.capture()));
-    }
-    @Test void tvuRejectsRealNodeAndIdenticalDatabaseUrl()throws Exception {
-        var fixture=SyntheticFixtureFactory.create(root.resolve("tvu"),false);var a=new AssessmentService().assess(fixture.options(false));
-        assertThrows(IOException.class,()->TvuExecution.prepare(fixture.options(false),a,fixture.node(),root.resolve("capture")));
-        Path clone=root.resolve("clone");Files.createDirectories(clone.resolve("cordapps"));Files.copy(fixture.node().resolve("node.conf"),clone.resolve("node.conf"));
-        var e=assertThrows(IOException.class,()->TvuExecution.prepare(fixture.options(false),a,clone,root.resolve("capture")));assertTrue(e.getMessage().contains("different disposable database"));
-    }
-    @Test void tvuCapturesApprovedProcessAndNonzeroExit()throws Exception {
-        var plan=new TvuExecution.Plan(root,root.resolve("synthetic"),root.resolve("capture"),List.of("/bin/sh","-c","printf 'synthetic TVU failure\\n'; exit 7"));
-        assertEquals(7,TvuExecution.run(plan,true,terminal("",new StringWriter()),5));assertTrue(Files.readString(plan.capture().resolve("console.log")).contains("synthetic TVU failure"));
-    }
     @Test void importSuccessfulTvuUpdatesMenuAndExitCode()throws Exception {
         var fixture=SyntheticFixtureFactory.create(root.resolve("import"),false);var options=fixture.options(false);var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
-        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("2\n"+fixture.log()+"\n1\nq\n",out)).run();
+        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n"+fixture.log()+"\n1\nq\n",out)).run();
         assertEquals(0,code);assertTrue(out.toString().contains("Session complete · READY TO UPGRADE"));
-    }
-    private Path cloneFor(SyntheticFixtureFactory.Fixture fixture)throws IOException {
-        Path clone=root.resolve("isolated-copy");Files.createDirectories(clone.resolve("cordapps"));
-        Files.writeString(clone.resolve("node.conf"),Files.readString(fixture.node().resolve("node.conf")).replace("synthetic.invalid/example","disposable.invalid/validation"));return clone;
-    }
-    @Test void cancelledExecutionWritesNoCapture()throws Exception {
-        var fixture=GuidedTvuFixtureFactory.create(root.resolve("cancel"),"success",false);var options=fixture.options();var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
-        new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n3\nq\n",out)).run();
-        assertTrue(out.toString().contains("TVU cancelled. No process was started."));assertFalse(Files.exists(fixture.control().resolve("started.pid")));
-        assertFalse(Files.exists(root.resolve("reports/tvu")));
-    }
-    @Test void invalidValidatorCannotReachApprovalOrUpgradeReady()throws Exception {
-        // A discovered synthetic TVU without an executable main must fail preparation before approval.
-        var fixture=SyntheticFixtureFactory.create(root.resolve("failed"),false);var options=fixture.options(false);var a=new AssessmentService().assess(options);StringWriter out=new StringWriter();
-        int code=new InteractiveSession(options,a,root.resolve("reports"),terminal("1\n2\nq\n",out)).run();
-        assertEquals(1,code);assertTrue(out.toString().contains("TVU SETUP FAILURE"));assertFalse(out.toString().contains("Yes, run TVU"));assertFalse(out.toString().contains("READY TO UPGRADE"));
-        assertFalse(Files.exists(root.resolve("reports/tvu")));
     }
     @Test void mainScreenHidesInternalEnumsAndAnalyzerVersion()throws Exception {
         var f=SyntheticFixtureFactory.create(root.resolve("main"),false);var a=new AssessmentService().assess(f.options(false));String text=AssessmentInsights.header(a)+AssessmentInsights.summary(a);
@@ -112,19 +80,5 @@ class InteractiveSessionTest {
         String out=session(true,"5\n1\nq\n");
         assertTrue(out.contains("Final package rescanned"));assertTrue(out.contains("Checksum file:"));
         try(var paths=Files.list(root.resolve("reports"))){assertEquals(1,paths.filter(p->p.toString().endsWith(".sha256")).count());}
-    }
-    @Test void databaseReviewNeverShowsCredentials()throws Exception {
-        Path conf=root.resolve("node.conf");Files.writeString(conf,"database.url=\"jdbc:postgresql://person:password@db.example/validation?password=hidden\"\n");
-        assertEquals("jdbc:postgresql://db.example/validation",TvuExecution.databaseTarget(conf));
-    }
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings={"dataSourceProperties.dataSource.url","dataSourceProperties.\"dataSource.url\"","database.url","dataSource.url","\"dataSource.url\""})
-    void guidedTvuRecognizesEverySupportedExplicitJdbcKey(String key)throws Exception {
-        Path conf=root.resolve("node.conf");Files.writeString(conf,key+"=\"jdbc:postgresql://db.example/validation\"\n");
-        assertEquals("jdbc:postgresql://db.example/validation",TvuExecution.databaseTarget(conf));
-    }
-    @Test void guidedTvuRejectsConflictingConnectionDeclarations()throws Exception {
-        Path conf=root.resolve("node.conf");Files.writeString(conf,"database.url=\"jdbc:postgresql://db.example/one\"\ndataSource.url=\"jdbc:postgresql://db.example/two\"\n");
-        assertTrue(assertThrows(IOException.class,()->TvuExecution.databaseTarget(conf)).getMessage().contains("conflict"));
     }
 }

@@ -66,9 +66,9 @@ public final class AssessmentService {
         if(Discovery.topLevel(Discovery.select(targetIdentity,"RUNTIME")).size()>1 && options.targetCorda()==null)findings.add(f("LP-DISCOVERY-006","Multiple target runtime artifacts were discovered","WARNING","UPGRADE_PATH",List.of("Runtime candidates="+Discovery.topLevel(Discovery.select(targetIdentity,"RUNTIME")).size()),"Intended runtime identity is ambiguous","Select the intended runtime with --target-corda and supply its dependency set."));
         if(tvu.size()>1)findings.add(f("LP-DISCOVERY-007","Multiple TVU artifacts were discovered","UNKNOWN","TVU",tvu.stream().map(JarInventory::path).toList(),"The validation artifact is ambiguous","Select the intended artifact with --tvu-jar or interactive discovery."));
         if(runtimes.isEmpty()||targetVersion.equals("unknown"))findings.add(f("LP-DISCOVERY-001","Target Corda runtime could not be uniquely identified","UNKNOWN","UPGRADE_PATH",List.of("Target version: "+targetVersion),"Assessment coverage is incomplete","Supply the intended target runtime using --target-corda with version metadata."));
-        if(tvu.isEmpty())findings.add(f("LP-DISCOVERY-002","Transaction Validator Utility artifact was not found","BLOCKED","TVU",List.of("No artifact with TVU entry point or contained TVU classes discovered"),"Required upgrade validation cannot be prepared","Add the target TVU JAR to the upgrade kit or use --tvu-jar."));
+        if(tvu.isEmpty())findings.add(f("LP-DISCOVERY-002","Transaction Validator Utility artifact was not found","BLOCKED","TVU",List.of("No artifact with TVU entry point or contained TVU classes discovered"),"The kit does not establish availability of the required validation tool","Add the target TVU JAR to the upgrade kit or use --tvu-jar."));
         for(JarInventory j:tvu)if(!Discovery.version(j).equals("unknown")&&!targetVersion.equals("unknown")&&!Discovery.version(j).equals(targetVersion))findings.add(f("LP-DISCOVERY-003","TVU and target runtime versions disagree","WARNING","TVU",List.of(j.path(),"TVU "+Discovery.version(j),"Target "+targetVersion),"Validation may use a different runtime","Prepare matching intended target artifacts and confirm the TVU environment."));
-        if(!oldApps.isEmpty()&&apps.isEmpty())findings.add(f("LP-CORDAPP-004","Target CorDapps are missing","BLOCKED","CORDAPP",List.of(oldApps.size()+" current CorDapps; zero target CorDapps"),"The prepared TVU environment is incomplete","Add rebuilt target CorDapps under upgrade-kit/cordapps."));
+        if(!oldApps.isEmpty()&&apps.isEmpty())findings.add(f("LP-CORDAPP-004","Target CorDapps are missing","BLOCKED","CORDAPP",List.of(oldApps.size()+" current CorDapps; zero target CorDapps"),"Target application coverage is incomplete","Add rebuilt target CorDapps under upgrade-kit/cordapps."));
         for(JarInventory j:Discovery.select(targetIdentity,"UNKNOWN"))findings.add(f("LP-DISCOVERY-004","Unclassified target JAR","WARNING","DEPENDENCY",List.of(j.path()),"Artifact role is uncertain; classes are included in the provisional target inventory","Verify artifact purpose and the actual verifier classpath."));
         progress.accept("Analyzing CorDapps and checking legacy-jars…");
         progress.accept("Comparing JVM APIs…");
@@ -106,19 +106,18 @@ public final class AssessmentService {
         boolean schemaKnown="CONFIGURED".equals(config.safeSettings().get("schemaResolution"));
         var configuredSchema=ConfigAnalyzer.tvuSchemaReadiness(config,targetVersion);
         boolean suppliedTvu=!options.tvuResults().isEmpty();
-        boolean automaticSchema=ConfigAnalyzer.canPrepareTvuSchema(config,targetVersion)&&tvu.size()==1&&Discovery.version(tvu.get(0)).equals(targetVersion);
         String primarySchema=Objects.toString(config.safeSettings().get("primarySchema"),"");
         TvuSchemaEvidence.Proof executedSchema;
         try{executedSchema=TvuSchemaEvidence.analyze(options.tvuResults(),primarySchema);}
         catch(IOException e){executedSchema=new TvuSchemaEvidence.Proof("UNPROVEN",false,false,primarySchema,List.of(),List.of(),List.of("Supplied TVU schema evidence could not be safely established"));}
-        boolean resolvedSchema=suppliedTvu?executedSchema.handled():automaticSchema||configuredSchema.proven();
-        String schemaStatus=!configuredSchema.applicable()?"NOT_APPLICABLE":suppliedTvu?executedSchema.status():automaticSchema?"AUTO_CONFIGURABLE":configuredSchema.proven()?"CONFIGURATION_PROVEN":"REQUIRED_UNPROVEN";
-        List<String> schemaProof=new ArrayList<>(configuredSchema.evidence());schemaProof.add(suppliedTvu?"Execution proof: "+executedSchema.status():automaticSchema?"LedgerPreflight can apply the known schema configuration in a private guided TVU workspace after explicit database confirmation":"Guided schema preparation is not established");
+        boolean resolvedSchema=suppliedTvu?executedSchema.handled():configuredSchema.proven();
+        String schemaStatus=!configuredSchema.applicable()?"NOT_APPLICABLE":suppliedTvu?executedSchema.status():configuredSchema.proven()?"CONFIGURATION_PROVEN":"REQUIRED_UNPROVEN";
+        List<String> schemaProof=new ArrayList<>(configuredSchema.evidence());schemaProof.add(suppliedTvu?"Imported schema-loading proof: "+executedSchema.status():"Static configuration evidence only; LedgerPreflight does not run TVU or change schema configuration");
         var schemaReadiness=new ConfigAnalyzer.TvuSchemaReadiness(configuredSchema.applicable(),suppliedTvu?executedSchema.handled():configuredSchema.proven(),schemaStatus,configuredSchema.configurationSource(),configuredSchema.effectiveSchema(),configuredSchema.mappedProperty(),configuredSchema.configuredValue(),List.copyOf(schemaProof));
         Map<String,Object> schemaSettings=new TreeMap<>(config.safeSettings());schemaSettings.put("tvuSchemaReadiness",schemaReadiness);
         config=new ConfigAnalyzer.ConfigEvidence(config.schema(),config.jdbcCurrentSchema(),config.hibernateDefaultSchema(),config.mixedCase(),config.contradictory(),config.postgresql(),config.issues(),config.sanitizedConfig(),Collections.unmodifiableMap(schemaSettings));
         if(config.postgresql()&&config.mixedCase()&&!resolvedSchema)findings.add(f("LP-DB-001",schemaKnown?"Mixed-case schema / TVU compatibility risk":"Mixed-case declarations; effective schema is unresolved",schemaReadiness.applicable()?"BLOCKED":"WARNING","DATABASE_SCHEMA",List.of("Effective schema: "+config.safeSettings().get("effectiveSchema"),"Resolution: "+config.safeSettings().get("schemaExplanation"),"Declarations: "+config.safeSettings().get("schemaDeclarations")),schemaKnown?"PostgreSQL resolution and normal node startup can succeed while TVU/Hibernate validates a different schema":"The declarations include mixed-case names, but conflicting or unresolved evidence prevents an effective-schema claim","Reconcile declarations and validate effective TVU schema resolution on a database copy; no database connection is made by static assessment."));
-        if(configuredSchema.applicable()&&executedSchema.mismatch())findings.add(f("LP-DB-004","TVU loaded a different default schema","BLOCKED","DATABASE_SCHEMA",executedSchema.evidence(),"Supplied TVU schema-loading evidence does not match the intended schema","Use the intended isolated configuration and rerun guided TVU with the correct schema."));
+        if(configuredSchema.applicable()&&executedSchema.mismatch())findings.add(f("LP-DB-004","TVU loaded a different default schema","BLOCKED","DATABASE_SCHEMA",executedSchema.evidence(),"Supplied TVU schema-loading evidence does not match the intended schema","Validate the intended schema using the supported TVU procedure, then import the new logs."));
         if(config.contradictory())findings.add(Finding.of("LP-DB-002","Schema declarations disagree","UNKNOWN","DATABASE_SCHEMA","UNKNOWN","CONFIGURATION","node.conf",List.of("Effective schema: Ambiguous","Declarations: "+config.safeSettings().get("schemaDeclarations")),"Node and TVU persistence paths may resolve different schemas","Reconcile intended schema and collect independent database evidence; do not infer table absence from Hibernate alone."));
         if(config.issues().stream().anyMatch(i->i.startsWith("Unresolved")||i.contains("unsupported expressions")))findings.add(f("LP-CONFIG-003","Configuration values remain unresolved","UNKNOWN","CONFIGURATION",config.issues(),"Effective configuration cannot be established safely","Supply the referenced local include or environment value; no database connection is needed."));
         progress.accept("Evaluating TVU readiness…");
@@ -160,28 +159,6 @@ public final class AssessmentService {
         evidence.put("analysis-coverage",Map.of("status",!current.issues().isEmpty()||!target.issues().isEmpty()||!currentIdentity.issues().isEmpty()||!targetIdentity.issues().isEmpty()||runtimeDelta.stream().anyMatch(i->i.id().equals("LP-ANALYSIS-LIMIT"))?"PARTIAL":"COMPLETE_WITHIN_LIMITS","currentIssues",current.issues(),"targetIssues",target.issues(),"limitsPerPhysicalArtifact",analysisLimits,"retainedSymbolMemoryLimitBytes",BytecodeScanner.MAX_RETAINED_BYTES,"currentInventory",Discovery.inventory(current),"targetInventory",Discovery.inventory(target)));
         findings=findings.stream().distinct().sorted().toList();
         return new Assessment("1","0.1.0",Assessment.readiness(findings,tvuEvidence.completeSuccess(),!options.tvuResults().isEmpty()),sourceVersion,targetVersion,findings,evidence);
-    }
-    /** Bind an explicit guided selection to this run without rewriting the original node's schema declarations. */
-    public static Assessment withGuidedSchemaProof(Options options,Assessment assessment,String selectedSchema)throws IOException {
-        if(selectedSchema==null||selectedSchema.isBlank()||!(assessment.evidence().get("schema-analysis") instanceof ConfigAnalyzer.ConfigEvidence config))return assessment;
-        String selected=ConfigAnalyzer.selectTvuSchema(config,selectedSchema);
-        if(!Objects.toString(config.safeSettings().get("primarySchema"),"").isBlank())return assessment;
-        if(!config.postgresql()||!assessment.targetVersion().matches("4\\.12(?:\\.[0-9]+)*"))return assessment;
-        TvuSchemaEvidence.Proof proof;
-        try{proof=TvuSchemaEvidence.analyze(options.tvuResults(),selected);}
-        catch(IOException e){proof=new TvuSchemaEvidence.Proof("UNPROVEN",false,false,selected,List.of(),List.of(),List.of("Guided schema evidence could not be safely established"));}
-        boolean applicable=!selected.equals(selected.toLowerCase(Locale.ROOT));
-        Map<String,Object> settings=new TreeMap<>(config.safeSettings());
-        settings.put("guidedTvuSchema",selected);
-        settings.put("tvuSchemaReadiness",new ConfigAnalyzer.TvuSchemaReadiness(applicable,proof.handled(),proof.status(),"Explicit guided selection from discovered schema candidates",selected,"hibernate.default_schema",ConfigAnalyzer.quotedTvuSchema(selected),proof.evidence()));
-        Map<String,Object> evidence=new TreeMap<>(assessment.evidence());evidence.put("tvu-schema-execution",proof);
-        evidence.put("schema-analysis",new ConfigAnalyzer.ConfigEvidence(config.schema(),config.jdbcCurrentSchema(),config.hibernateDefaultSchema(),config.mixedCase(),config.contradictory(),config.postgresql(),config.issues(),config.sanitizedConfig(),Collections.unmodifiableMap(settings)));
-        List<Finding> findings=new ArrayList<>(assessment.findings());
-        if(proof.handled())findings.removeIf(f->f.id().equals("LP-DB-001"));
-        else if(applicable&&findings.stream().noneMatch(f->Set.of("LP-DB-001","LP-DB-003","LP-DB-004").contains(f.id())&&f.severity().equals("BLOCKED")))findings.add(f("LP-DB-004","Required guided TVU schema loading was not established","BLOCKED","DATABASE_SCHEMA",proof.evidence(),"This run does not establish the intended default schema","Review the selected schema and captured validator evidence before rerunning TVU."));
-        // LP-DB-002 still describes the unchanged source configuration; TVU cannot repair that ambiguity.
-        boolean tvuSuccess=evidence.get("tvu-summary") instanceof TvuAnalyzer.TvuEvidence tvu&&tvu.completeSuccess();
-        return new Assessment(assessment.schemaVersion(),assessment.productVersion(),Assessment.readiness(findings,tvuSuccess,true),assessment.sourceVersion(),assessment.targetVersion(),findings,evidence);
     }
     private static ScanResult selectedInputs(ScanResult identity,String...roles){return new ScanResult(Discovery.select(identity,roles),List.of());}
     private static ScanResult broadInputs(ScanResult identity){return new ScanResult(identity.jars().stream().filter(j->!Set.of("CORDAPP","LEGACY_CONTRACT","DRIVER","TVU").contains(Discovery.role(j))).toList(),List.of());}

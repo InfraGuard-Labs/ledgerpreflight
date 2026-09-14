@@ -45,6 +45,7 @@ def quiet(text):
     for forbidden in ('C:\\Users', 'LP-API', 'LP-INPUT', 'LP-ANALYSIS', 'Ljava/', 'CURRENT_NODE_RUNTIME',
                       'TARGET_NODE_RUNTIME', 'TARGET_VERIFIER', 'currentInventory', 'targetInventory',
                       'View technical evidence', 'View full technical report', 'REQUIRED_OR_UNRESOLVED',
+                      'Run TVU safely', 'Run TVU again', 'Exact execution command', 'TVU SETUP FAILURE',
                       'Analyzer:', 'SyntheticPasswordOnly42', 'OutOfMemoryError', 'Exception in thread'):
         assert forbidden not in text, forbidden
     assert not re.search(r'\d+ warnings', text)
@@ -215,8 +216,8 @@ for variant in ('blocked-no-tvu', 'blocked-tvu', 'compatible'):
                 assert term in terminal.display(), term
             terminal.capture('36-hierarchy-tvu-result.png', 'Correlated TVU failure with no inherited-helper noise')
         else:
-            assert '1 blocker' in terminal.display() and 'View TVU evidence' not in terminal.display()
-            terminal.capture('30-hierarchy-static-result.png', 'Static blocker with automatic guided schema preparation')
+            assert '2 blockers' in terminal.display() and 'View TVU evidence' not in terminal.display()
+            terminal.capture('30-hierarchy-static-result.png', 'Static compatibility and unproven schema blockers')
         terminal.action('View compatibility evidence')
         terminal.menu()
         for term in ('example-old-contract.jar', 'org.example.runtime.Amounts.total(Iterable)', 'Current runtime', 'Target runtime', 'Target verifier', 'Method found', 'Method missing'):

@@ -28,7 +28,7 @@ public final class ProductView {
                 default->"Upgrade preparation";
             };
             groups.computeIfAbsent(group,k->new ArrayList<>()).add(f);
-            if(blockedApi(f)&&!value(f,"unknownContexts").isEmpty())groups.computeIfAbsent("Compatibility analysis incomplete",k->new ArrayList<>()).add(f);
+
         }
         boolean confirmedCompatibility=a.findings().stream().anyMatch(ProductView::blockedApi);
         List<Issue> result=new ArrayList<>();
@@ -50,15 +50,12 @@ public final class ProductView {
                     action=absent?(!nodeBlocked&&verifierBlocked?"Use a compatible target verifier or supported compatibility fix, then validate again.":"Use a compatible target runtime or supported compatibility fix, then validate again."):first.recommendedNextAction();
                 }
                 case "Target CorDapp mapping" -> {
-                    happened="Target CorDapp mapping: unresolved.";
+                    happened="A current CorDapp could not be paired with one target replacement.";
                     matters="Replacement and signing continuity checks need a clear current-to-target CorDapp pairing.";
                     action="Confirm which target CorDapp replaces the current CorDapp, then validate again.";
                 }
                 case "TVU validation" -> {
-                    GuidedFailure execution=guidedFailure(a);
-                    if(execution!=null) {
-                        happened=execution.happened();matters="Successful complete validation is required before upgrading.";action=execution.action();
-                    } else if(a.evidence().get("tvu-summary") instanceof TvuEvidence t && t.failed()!=null&&t.failed()>0) {
+                    if(a.evidence().get("tvu-summary") instanceof TvuEvidence t && t.failed()!=null&&t.failed()>0) {
                         happened=Objects.toString(t.processed(),"Unconfirmed")+" processed · "+Objects.toString(t.succeeded(),"unconfirmed")+" passed · "+t.failed()+" failed.";
                         String correlation=correlation(a,t);if(!correlation.isEmpty())happened+="\n  "+correlation;
                         matters="Required historical transaction validation has not passed.";
@@ -121,52 +118,44 @@ public final class ProductView {
     }
     private static String schemaSetup(Assessment a) {
         return switch(schemaSetupStatus(a)){
-            case "AUTO_CONFIGURABLE" -> "\nSchema setup\nMixed-case PostgreSQL schema detected.\nLedgerPreflight can configure the required TVU schema automatically\nin the guided validation workspace.\n";
-            case "HANDLED" -> a.evidence().containsKey("tvu-run")?"\nSchema setup\n✓ LedgerPreflight configured the required TVU schema for this run.\n":"\nSchema setup\n✓ The supplied TVU evidence confirms the required schema.\n";
+            case "HANDLED" -> "\nSchema setup\n✓ The supplied TVU evidence confirms the required schema.\n";
             case "CONFIGURATION_PROVEN" -> "\nSchema setup\nThe selected configuration explicitly defines the intended schema.\n";
             default -> "";
         };
     }
-    private static String tvuOutcome(Assessment a) {
-        Object value=a.evidence().get("tvu-run");if(!(value instanceof Map<?,?> run))return "";
-        String description=switch(Objects.toString(run.get("failureKind"),"")){
-            case "SETUP_FAILURE" -> "TVU setup could not be completed. Review the reported setup problem.";
-            case "DATABASE_CONNECTION_FAILURE" -> "TVU could not connect to the confirmed isolated database.";
-            case "EXECUTION_FAILURE" -> "The TVU run did not complete successfully.";
-            case "USER_CANCELLATION" -> "TVU run cancelled. Partial evidence was saved.";
-            default -> "";
-        };
-        return description.isEmpty()?"":"\nTVU\n"+description+"\n";
-    }
-    private record GuidedFailure(String happened,String action){}
-    private static GuidedFailure guidedFailure(Assessment a) {
-        // Preserve actually observed transaction failures even if execution later stops.
-        if(a.evidence().get("tvu-summary") instanceof TvuEvidence t&&t.failed()!=null&&t.failed()>0)return null;
-        Object value=a.evidence().get("tvu-run");if(!(value instanceof Map<?,?> run))return null;
-        return switch(Objects.toString(run.get("failureKind"),"")) {
-            case "USER_CANCELLATION" -> new GuidedFailure("TVU run cancelled. Partial evidence was saved.","Run TVU again when ready to complete validation.");
-            case "DATABASE_CONNECTION_FAILURE" -> new GuidedFailure("TVU could not connect to the confirmed isolated database.","Check the confirmed isolated database connection, then run TVU again.");
-            case "SETUP_FAILURE" -> new GuidedFailure("TVU setup could not be completed.","Review the reported setup problem, correct it, then run TVU again.");
-            case "EXECUTION_FAILURE" -> new GuidedFailure("The TVU run did not complete successfully.","Review the captured execution and cleanup evidence, then run TVU again.");
-            default -> null;
-        };
+    private static String environmentSummary(Assessment a) {
+        StringBuilder out=new StringBuilder();
+        if(a.evidence().get("discovery") instanceof Discovery.Model d){
+            out.append("Platform ").append(d.sourcePlatform()).append(" → ").append(d.targetPlatform()).append(" · CorDapps ").append(d.currentCordappJars()).append(" current → ").append(d.targetCordappJars()).append(" target\n");
+        }
+        if(a.evidence().get("environment") instanceof Map<?,?> env&&env.get("host") instanceof HostEnvironment host){
+            String current=host.currentJava().equals("UNKNOWN")?"Not established":host.currentJava().equals("NOT_INSTALLED")?"Not installed":host.currentJava()+ (host.currentJavaSource().equals("USER_SUPPLIED_SOURCE_HOST")?" (reported)":" (launcher)");
+            out.append("Java: ").append(current).append(" · target requires ").append(host.targetRequiredJava()).append("\n");
+        }
+        if(a.evidence().get("schema-analysis") instanceof io.ledgerpreflight.evidence.ConfigAnalyzer.ConfigEvidence config)
+            out.append(config.safeSettings().getOrDefault("databaseVendor","Database not established")).append(" · Schema: ").append(config.safeSettings().getOrDefault("effectiveSchema","Not established")).append("\n");
+        boolean supplied=Boolean.TRUE.equals(a.evidence().get("tvu-evidence-supplied"));
+        out.append("TVU: ").append(supplied?"Imported results":"Not supplied");
+        if(supplied&&a.evidence().get("tvu-summary") instanceof TvuEvidence t)
+            out.append(" · ").append(Objects.toString(t.processed(),"Unconfirmed")).append(" processed · ").append(Objects.toString(t.succeeded(),"unconfirmed")).append(" passed · ").append(Objects.toString(t.failed(),"unconfirmed")).append(" failed");
+        return out.append("\n").toString();
     }
     public static String result(Assessment a) {
         Object env=a.evidence().get("environment");String node=env instanceof Map<?,?> map?Objects.toString(map.get("nodeName"),"Selected node"):"Selected node";
-        StringBuilder out=new StringBuilder("LedgerPreflight "+a.productVersion()+"\n────────────────────────────────────────\n\n"+node+"\nCorda "+a.sourceVersion()+" → "+a.targetVersion()+"\n\n"+(a.status().startsWith("READY ")?"✓ ":"✕ ")+state(a)+"\n");
-        if(a.status().equals("READY FOR TVU"))return out+"\nStatic compatibility checks passed.\nNo blocking configuration problems were found.\n"+schemaSetup(a)+"\nNEXT STEP\nRun the Transaction Validator Utility before upgrading.\n";
+        StringBuilder out=new StringBuilder("LedgerPreflight "+a.productVersion()+"\n────────────────────────────────────────\n\n"+node+"\nCorda "+a.sourceVersion()+" → "+a.targetVersion()+"\n"+environmentSummary(a)+"\n"+(a.status().startsWith("READY ")?"✓ ":"✕ ")+state(a)+"\n");
+        if(a.status().equals("READY FOR TVU"))return out+"\nStatic compatibility checks passed.\nNo blocking configuration problems were found.\n"+schemaSetup(a)+"\nNEXT STEP\nRun TVU separately using the supported Corda procedure, then import its results.\n";
         if(a.status().equals("READY TO UPGRADE"))return out+"\nStatic checks passed · CorDapps compatible · TVU passed\n"+schemaSetup(a)+"\nFollow your normal supported Corda upgrade procedure.\n";
         if(a.status().equals("UNKNOWN"))out.append("Readiness is unproven: some required evidence is incomplete.\n");
         if(a.status().equals("WARNING"))out.append("Required reviews remain before upgrading.\n");
         List<Issue> issues=issues(a);long blocking=issues.stream().filter(Issue::blocking).count();
-        out.append("\n").append(blocking).append(blocking==1?" blocker":" blockers");
+        out.append(blocking).append(blocking==1?" blocker":" blockers");
         long unresolved=issues.stream().filter(i->!i.blocking()&&!i.warning()).count();
         if(unresolved>0)out.append(" · ").append(unresolved).append(unresolved==1?" unresolved review":" unresolved reviews");
         else if(blocking==0&&!issues.isEmpty())out.append(" · ").append(issues.size()).append(issues.size()==1?" review required":" reviews required");
         out.append("\n");
         int ordinal=0,details=0;List<Issue> selected=new ArrayList<>();
-        for(Issue issue:issues)if(!issue.warning())selected.add(issue);
-        issues.stream().filter(Issue::warning).findFirst().ifPresent(selected::add);
+        for(Issue issue:issues)if(!issue.warning()&&selected.size()<3)selected.add(issue);
+        issues.stream().filter(Issue::warning).filter(i->blocking==0||!i.title().equals("Target CorDapp mapping")).findFirst().ifPresent(selected::add);
         for(Issue issue:selected) {
             out.append("\n").append(issue.blocking()?(++ordinal)+". ":issue.warning()?"! ":"? ").append(issue.title()).append("\n");
             if(details++>=3){out.append("Details and recommended action are in the exported technical report.\n");continue;}
@@ -175,23 +164,19 @@ public final class ProductView {
             out.append("WHAT TO DO  ").append(issue.summaryAction()).append("\n");
         }
         if(issues.size()>selected.size())out.append("\nAdditional issues are explained in the exported technical report.\n");
-        GuidedFailure execution=guidedFailure(a);
-        boolean executionExplained=execution!=null&&selected.stream().limit(3).anyMatch(i->i.title().equals("TVU validation"));
-        if(!executionExplained)out.append(tvuOutcome(a));
         out.append(schemaSetup(a));
         out.append("\nNEXT STEP\n");
         boolean compatibility=issues.stream().anyMatch(i->i.title().equals("CorDapp compatibility")&&i.blocking());
         boolean schema=issues.stream().anyMatch(i->i.title().equals("Schema configuration")&&i.blocking());
         boolean tvu=issues.stream().anyMatch(i->i.title().equals("TVU validation")&&i.blocking());
-        if(execution!=null&&issues.stream().allMatch(i->i.title().equals("TVU validation")))out.append(execution.action()).append("\n");
-        else if(compatibility&&schema&&blocking==2&&unresolved==0&&!Boolean.TRUE.equals(a.evidence().get("tvu-evidence-supplied")))out.append("Resolve both blockers, then run TVU.\n");
-        else if(compatibility&&schema&&tvu&&blocking==3&&unresolved==0)out.append("Resolve the CorDapp and schema blockers.\nThen rerun LedgerPreflight and TVU.\n");
-        else if(compatibility&&tvu&&blocking==2&&unresolved==0)out.append("Resolve the compatibility blocker, then run TVU again.\n");
-        else if(blocking>1)out.append("Resolve all ").append(blocking).append(" blockers").append(unresolved>0?" and complete the unresolved reviews":"").append(".\nThen rerun LedgerPreflight and TVU.\n");
-        else if(compatibility)out.append("Resolve the CorDapp compatibility blocker").append(unresolved>0?" and complete the unresolved reviews":"").append(".\nThen rerun LedgerPreflight and TVU.\n");
-        else if(blocking==1)out.append("Resolve the blocker").append(unresolved>0?" and complete the unresolved reviews":"").append(".\nThen rerun LedgerPreflight and TVU.\n");
+        if(compatibility&&schema&&blocking==2&&unresolved==0&&!Boolean.TRUE.equals(a.evidence().get("tvu-evidence-supplied")))out.append("Resolve both blockers, then run TVU separately and import the results.\n");
+        else if(compatibility&&schema&&tvu&&blocking==3&&unresolved==0)out.append("Resolve the CorDapp and schema blockers.\nThen reassess, run TVU separately, and import the results.\n");
+        else if(compatibility&&tvu&&blocking==2&&unresolved==0)out.append("Resolve the compatibility blocker, then run TVU separately and import the results.\n");
+        else if(blocking>1)out.append("Resolve all ").append(blocking).append(" blockers").append(unresolved>0?" and complete the unresolved reviews":"").append(".\nThen reassess, run TVU separately, and import the results.\n");
+        else if(compatibility)out.append("Resolve the CorDapp compatibility blocker").append(unresolved>0?" and complete the unresolved reviews":"").append(".\nThen reassess, run TVU separately, and import the results.\n");
+        else if(blocking==1)out.append("Resolve the blocker").append(unresolved>0?" and complete the unresolved reviews":"").append(".\nThen reassess, run TVU separately, and import the results.\n");
         else if(issues.stream().anyMatch(i->i.title().equals("Compatibility analysis incomplete")))out.append("Complete compatibility analysis before upgrading.\n");
-        else out.append("Resolve the outstanding reviews, then rerun LedgerPreflight and TVU.\n");
+        else out.append("Resolve the outstanding reviews, then reassess and import new TVU results.\n");
         return out.toString();
     }
     private ProductView(){}

@@ -37,23 +37,23 @@ drive(){
   wait_new 1 '> Continue'
   tr '\000' '\n' < /proc/"$(cat /tmp/run-a-package/required-symbol.pid)"/cmdline > "$out.command.txt"
   at=$(position);printf '\r'
-  wait_new "$at" '> Run TVU safely'
-  at=$(position);printf 'jj\r'
+  wait_new "$at" '> Import existing TVU results'
+  at=$(position);printf 'j\r'
   wait_new "$at" 'Method missing'
   wait_new "$at" '> Back'
   at=$(position);printf '\r'
-  wait_new "$at" '> Run TVU safely'
-  # Guided TVU and import precede compatibility, schema, export and support.
-  at=$(position);printf 'jjjj\r'
+  wait_new "$at" '> Import existing TVU results'
+  # Import precedes compatibility, schema, export and support.
+  at=$(position);printf 'jjj\r'
   wait_new "$at" 'Technical report exported'
   wait_new "$at" '> Back'
   at=$(position);printf '\r'
-  wait_new "$at" '> Run TVU safely'
-  at=$(position);printf 'jjjjj\r'
+  wait_new "$at" '> Import existing TVU results'
+  at=$(position);printf 'jjjj\r'
   wait_new "$at" 'READY TO SHARE'
   wait_new "$at" '> Back'
   at=$(position);printf '\r'
-  wait_new "$at" '> Run TVU safely'
+  wait_new "$at" '> Import existing TVU results'
   printf q
   sleep 1
 }
@@ -68,7 +68,7 @@ for expected in 'NODE DISCOVERED' '4.11.6' 'Platform 13' '4.12.11' 'Platform 140
   grep -qF "$expected" "$file"
 done
 grep -qF "$hide" "$file";grep -qF "$show" "$file"
-if grep -Eq 'OutOfMemoryError|Exception in thread|Compatibility analysis incomplete|View technical evidence|View full technical report|View TVU evidence|currentInventory|LP-API|LP-INPUT|LP-ANALYSIS|Ljava/|[0-9]+ warnings|650 processed|201 failed|Transactions processed' "$file"; then
+if grep -Eq 'Run TVU safely|Run TVU again|Exact execution command|OutOfMemoryError|Exception in thread|Compatibility analysis incomplete|View technical evidence|View full technical report|View TVU evidence|currentInventory|LP-API|LP-INPUT|LP-ANALYSIS|Ljava/|[0-9]+ warnings|650 processed|201 failed|Transactions processed' "$file"; then
   printf 'Unexpected diagnostic noise or invented TVU result in packaged output\n' >&2
   exit 1
 fi

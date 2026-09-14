@@ -14,16 +14,24 @@ import java.util.*;
 import java.util.concurrent.Callable;
 
 @Command(name="ledger-preflight",version="LedgerPreflight 0.1.0",mixinStandardHelpOptions=true,
- description="Know what will break before you upgrade Corda. Read-only preflight and explicitly approved TVU validation.",
+ description="Corda upgrade preflight and analysis of existing TVU results. Inputs remain read-only; LedgerPreflight does not run TVU.",
  subcommands={Main.Assess.class,Main.Inventory.class,Main.AnalyzeJar.class,Main.CompareRuntime.class,Main.AnalyzeTvu.class,Main.Explain.class,Main.Bundle.class,Main.Rules.class,Main.Version.class})
 public final class Main implements Callable<Integer> {
     @Spec Model.CommandSpec rootSpec;
     public static void main(String[] args){try{CommandLine cli=command();int code=cli.execute(args);cli.getOut().flush();cli.getErr().flush();System.exit(code);}catch(VirtualMachineError fatal){if(System.console()!=null&&System.getenv("CI")==null)System.err.print("\u001b[?25h");System.err.println("LedgerPreflight could not complete analysis safely. No upgrade readiness was established.");System.err.flush();System.exit(3);}}
-    public static CommandLine command(){return new CommandLine(new Main()).setExecutionExceptionHandler((e,c,p)->{c.getErr().println("Assessment error: "+Sanitizer.redact(Objects.toString(e.getMessage(),e.getClass().getSimpleName())).replaceAll("[\\p{Cntrl}]"," "));return 3;});}
+    public static CommandLine command(){return new CommandLine(new Main())
+        .setParameterExceptionHandler((e,args)->{
+            Set<String> removed=Set.of("--run-tvu","--confirm-isolated-db","--tvu-node-conf","--tvu-schema");
+            if(Arrays.stream(args).map(arg->arg.split("=",2)[0]).anyMatch(removed::contains))
+                e.getCommandLine().getErr().println("LedgerPreflight v0.1.0 does not run TVU. Import existing logs or error ZIPs with --tvu-results. No assessment inputs were read.");
+            else {e.getCommandLine().getErr().println(SessionTerminal.safe(e.getMessage()));e.getCommandLine().usage(e.getCommandLine().getErr());}
+            return e.getCommandLine().getCommandSpec().exitCodeOnInvalidInput();
+        })
+        .setExecutionExceptionHandler((e,c,p)->{c.getErr().println("Assessment error: "+Sanitizer.redact(Objects.toString(e.getMessage(),e.getClass().getSimpleName())).replaceAll("[\\p{Cntrl}]"," "));return 3;});}
     public Integer call(){
         Console console=System.console();
         if(console==null || System.getenv("CI")!=null){
-            rootSpec.commandLine().getOut().println("LedgerPreflight — Corda upgrade preflight\n\nSupply your current node and prepared target upgrade kit:\n  ledger-preflight assess --node /path/to/node --upgrade-kit /path/to/target\n\nRun in a terminal for guided setup. Use --help for all commands.");
+            rootSpec.commandLine().getOut().println("LedgerPreflight — Corda upgrade preflight\n\nSupply your current node and prepared target upgrade kit:\n  ledger-preflight assess --node /path/to/node --upgrade-kit /path/to/target\n\nRun in a terminal for interactive discovery. Use --help for all commands.");
             return 0;
         }
         console.printf("LedgerPreflight — Corda upgrade preflight%n%nPrepare your current node directory and a separate target upgrade kit.%nAssessment reads these inputs without changing the node or database.%nLeave a path blank to exit.%n%n");
@@ -44,15 +52,11 @@ public final class Main implements Callable<Integer> {
         @Option(names="--legacy-jars") Path legacyJars;
         @Option(names="--node-conf") Path nodeConf;
         @Option(names="--tvu-results",description="Repeat for logs, error ZIPs or evidence directories.") List<Path> tvuResults=new ArrayList<>();
-        @Option(names="--run-tvu",description="Prepare and run guided TVU, then automatically reassess its captured evidence.") boolean runTvu;
-        @Option(names="--tvu-node-conf",description="Configuration for the isolated database copy; credentials remain in this file.") Path tvuNodeConf;
-        @Option(names="--confirm-isolated-db",description="Explicitly confirm the TVU database is an isolated/non-production copy; required for non-interactive execution.") boolean confirmIsolatedDb;
-        @Option(names="--tvu-schema",description="Explicit intended schema from discovered configuration, when the primary schema is ambiguous.") String tvuSchema;
         @Option(names="--verifier-classpath") Path verifierClasspath;
         @Option(names="--rule-pack") Path rulePack;
         @Option(names="--host-environment",description="Optional bounded JSON evidence: sourceHostOs, currentJava, plannedTargetJava.") Path hostEnvironment;
         @Option(names="--network-mode",defaultValue="unknown",description="Planned network state: mixed, all-4.12, or unknown.") String networkMode;
-        @Option(names="--offline",description="Static analysis is always offline; guided TVU connects only after explicit database confirmation.") boolean offline;
+        @Option(names="--offline",description="Assessment and existing-TVU analysis are always offline; no network or database connections.") boolean offline;
         @Option(names="--json",description="Emit one sanitized JSON assessment on stdout; progress stays on stderr.") boolean json;
         @Option(names="--color",defaultValue="auto",description="Terminal color: auto, always, never. Auto is disabled for redirection and CI.") String color;
         @Option(names={"--verbose","--debug"},description="Include full evidence for every finding in terminal output; secrets remain redacted.") boolean verbose;
@@ -62,32 +66,24 @@ public final class Main implements Callable<Integer> {
         @Spec Model.CommandSpec spec;
         public Integer call()throws Exception {
             boolean interactive=System.console()!=null && System.getenv("CI")==null && !json && !nonInteractive;
-            if(runTvu&&!interactive&&!confirmIsolatedDb)throw new IOException("Running TVU requires --confirm-isolated-db after you have identified an isolated / non-production database copy. No TVU process was started.");
             if(!Set.of("auto","always","never").contains(color))throw new IOException("Invalid --color: use auto, always or never");
             if(!Set.of("unknown","mixed","all-4.12").contains(networkMode))throw new IOException("Invalid --network-mode: use mixed, all-4.12 or unknown");
             node=node.toRealPath();kit=kit.toRealPath();
             Path out=output.toAbsolutePath().normalize();
-            for(Path root:Arrays.asList(node,kit,targetCorda,tvuJar,targetCordapps,legacyJars,nodeConf,tvuNodeConf,verifierClasspath,rulePack,hostEnvironment))if(root!=null)ensureOutputSeparate(out,root);
+            for(Path root:Arrays.asList(node,kit,targetCorda,tvuJar,targetCordapps,legacyJars,nodeConf,verifierClasspath,rulePack,hostEnvironment))if(root!=null)ensureOutputSeparate(out,root);
             for(Path root:tvuResults)ensureOutputSeparate(out,root);
             var options=new AssessmentService.Options(node,kit,targetCorda,tvuJar,targetCordapps,legacyJars,nodeConf,tvuResults,verifierClasspath,rulePack,networkMode,hostEnvironment);
             SessionTerminal terminalUI=SessionTerminal.system(spec.commandLine().getOut(),plainTerminal);
             if(interactive){options=DiscoverySession.prepare(options,terminalUI);if(options==null)return 0;}
             if(!interactive)spec.commandLine().getErr().println("Inspecting supplied artifacts read-only; no network or database connections...");
             Assessment a=new AssessmentService().assess(options,interactive?terminalUI::text:ignored->{});
-            if(runTvu&&!interactive){
-                var plan=GuidedTvuExecution.inspect(options,a,tvuNodeConf,tvuSchema,out);
-                spec.commandLine().getErr().println("Running TVU against the explicitly confirmed isolated database. Detailed output is captured privately.");
-                long[] last={-5};
-                var outcome=GuidedTvuExecution.run(plan,true,86400,p->{if(p.elapsedSeconds()-last[0]>=5){last[0]=p.elapsedSeconds();spec.commandLine().getErr().println("TVU: "+(p.processed()==null?"transactions not yet reported":p.processed()+" processed"+(p.expected()==null?"":" / "+p.expected()))+(p.failed()==null?"":" · "+p.failed()+" failures observed")+" · "+p.elapsedSeconds()+"s elapsed");spec.commandLine().getErr().flush();}},()->false);
-                options=InteractiveSession.withTvu(options,outcome.evidencePaths());a=InteractiveSession.assessGuided(options,outcome);
-            }
             Map<String,String> files=Reports.files(a);Reports.write(output,files);
             if(interactive){if(verbose){terminalUI.text(Reports.terminal(a,true));terminalUI.choose("",List.of("Continue to assessment"));}}
             else if(json)spec.commandLine().getOut().print(Reports.json(a));
             else {String terminal=Reports.terminal(a,verbose);boolean colored=color.equals("always") || color.equals("auto") && System.console()!=null && System.getenv("CI")==null && !"dumb".equals(System.getenv("TERM"));if(colored){String ansi=a.status().equals("BLOCKED")?"\u001b[31m":a.status().startsWith("READY")?"\u001b[32m":"\u001b[33m";terminal=terminal.replace(" "+a.status()+"\n"," "+ansi+a.status()+"\u001b[0m\n");}spec.commandLine().getOut().print(terminal);}
             if(bundle){Path checksum=createSupportPackage(output.resolve("support.zip"),bundleFiles(files));spec.commandLine().getErr().println("READY TO SHARE\nPackage: "+output.resolve("support.zip").toAbsolutePath().normalize()+"\nChecksum: "+checksum);}
             if(!json&&!interactive)spec.commandLine().getOut().println("Full details: "+Sanitizer.redact(output.toString())+"/report.html");
-            if(interactive)return new InteractiveSession(options,a,output,terminalUI,tvuNodeConf,tvuSchema).run(runTvu);
+            if(interactive)return new InteractiveSession(options,a,output,terminalUI).run();
             return a.exitCode();
         }
     }
@@ -102,7 +98,7 @@ public final class Main implements Callable<Integer> {
         Reports.checkNoSymlink(zip);Reports.checkNoSymlink(checksum);
         if(Files.exists(zip,LinkOption.NOFOLLOW_LINKS)||Files.exists(checksum,LinkOption.NOFOLLOW_LINKS))throw new IOException("Support package or checksum already exists; choose a new output path.");
         new SupportBundle().create(zip,files);
-        String hash=GuidedTvuExecution.hash(zip);
+        String hash=FileHashes.sha256(zip);
         Path temporary=Files.createTempFile(zip.getParent(),".ledgerpreflight-checksum-",".tmp");
         try{Files.writeString(temporary,hash+"  "+zip.getFileName()+"\n",StandardCharsets.UTF_8);Files.move(temporary,checksum);}
         finally{Files.deleteIfExists(temporary);}
@@ -148,7 +144,7 @@ public final class Main implements Callable<Integer> {
         @Spec Model.CommandSpec spec;
         public Integer call()throws IOException {
             Reports.checkNoSymlink(assessment);Map<String,String> files=new TreeMap<>();
-            List<String> names=List.of("execution-contexts.json","required-symbol-resolution.json","current-runtime-selection.json","analysis-coverage.json","discovery.json","tvu-evidence-supplied.json","tvu-run.json","tvu-schema-execution.json","assessment.json","summary.txt","report.html","environment.json","upgrade-kit.json","cordapps-current.json","cordapps-target.json","runtime-api-delta.json","internal-api-usage.json","legacy-jars-analysis.json","classpath-analysis.json","schema-analysis.json","tvu-summary.json","findings.json","reproduction.txt","sanitized-node.conf");
+            List<String> names=List.of("execution-contexts.json","required-symbol-resolution.json","current-runtime-selection.json","analysis-coverage.json","discovery.json","tvu-evidence-supplied.json","tvu-schema-execution.json","assessment.json","summary.txt","report.html","environment.json","upgrade-kit.json","cordapps-current.json","cordapps-target.json","runtime-api-delta.json","internal-api-usage.json","legacy-jars-analysis.json","classpath-analysis.json","schema-analysis.json","tvu-summary.json","findings.json","reproduction.txt","sanitized-node.conf");
             if(!Files.isDirectory(assessment,LinkOption.NOFOLLOW_LINKS))throw new IOException("Assessment must be a generated report directory");
             for(String name:names){Path p=assessment.resolve(name);if(Files.exists(p,LinkOption.NOFOLLOW_LINKS))files.put(name,new String(SafeInputs.read(p,SafeInputs.MAX_TEXT_BYTES),StandardCharsets.UTF_8));}
             if(!files.containsKey("assessment.json"))throw new IOException("assessment.json is required");Path checksum=createSupportPackage(output,bundleFiles(files));spec.commandLine().getOut().println("READY TO SHARE\nPackage: "+output.toAbsolutePath().normalize()+"\nChecksum: "+checksum);return 0;

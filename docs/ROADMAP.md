@@ -1,7 +1,9 @@
 # Scope and roadmap
 
-Version 0.1.0 is a standalone Linux-first CLI with a bundled Java 17 runtime. Its release validation matrix targets Ubuntu 18.04, 20.04 and 22.04 LTS x86_64. It covers offline artifact discovery, JVM member compatibility, configuration risks, TVU evidence correlation, constrained local rules, reports and sanitized support bundles for the Corda 4.11 to 4.12 migration workflow. Headless terminal use is primary; HTML is secondary executive output. No Jenkins plugin or dashboard is part of the product.
+Version 0.1.0 is a standalone Linux CLI for Corda upgrade preflight and analysis of existing TVU evidence. Its Linux x86_64 package includes private Java 17. Release validation targets Ubuntu 18.04, 20.04, 22.04 and 24.04, including coexistence with node Java 8.
 
-Future 1.x work should refine evidence handling and versioned rules using reproducible cases and public vendor documentation. Privately licensed artifacts may be validated in ignored local fixtures; they must not become release dependencies.
+The scope covers offline artifact discovery, exact JVM member compatibility, configuration risks, imported TVU failure correlation, constrained local rules, technical reports and sanitized support evidence. Headless terminal use is primary; HTML is an output artifact.
 
-Possible later work includes deeper mapping from historical transactions to attachments, controlled TVU orchestration and richer target comparisons. These are possibilities, not shipped features or commitments. Production upgrades, fleet management and automated database changes remain outside the v1 product.
+v0.1.0 does not execute TVU or Corda, clone databases, run migrations or perform upgrades. Future work should improve evidence quality and versioned rules using reproducible cases and public vendor documentation. No future orchestration feature is a release commitment.
+
+Privately licensed validation inputs may be used only in ignored local fixtures. They must never become public fixtures, build-context contents or release dependencies.

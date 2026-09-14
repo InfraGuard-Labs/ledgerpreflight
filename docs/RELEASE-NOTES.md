@@ -1,27 +1,36 @@
-# LedgerPreflight 0.1.0 (unreleased)
+# LedgerPreflight v0.1.0
 
-Standalone Linux Corda upgrade assurance. No tag, GitHub Release or public image publication is part of this candidate. The next gate is an operator-run guided TVU assessment against a confirmed isolated copy of a real environment.
+LedgerPreflight is a Corda upgrade preflight and TVU analysis tool for external evaluation.
 
-The product flow is Environment → Result → relevant evidence, guided TVU, export and support actions. Guided TVU requires explicit isolated-database confirmation, prepares target artifacts in a private workspace, selects the compatible private Java runtime, captures sanitized progress and error evidence, manages the validator/verifier process tree and automatically reassesses the result. An alternate safe configuration can be supplied; original node and kit inputs remain unchanged. Physical artifact identity is established before deep analysis. Runtime manifests, TVU entries, modern CorDapp headers and targeted legacy class headers survive incomplete compatibility scanning. Per-artifact deep budgets prevent a large capsule from starving later files; nested libraries do not inflate physical artifact counts.
+It compares a current node with a target upgrade kit, identifies upgrade risks and analyzes existing TVU logs/error bundles to help explain validation failures.
 
-Required compatibility questions come from active current CorDapp bytecode. Independent bounded lookup proves exact current and target classes, methods and fields inside runtime capsules, even when unrelated broad indexing is partial. Findings distinguish a missing member, missing class, changed descriptor and unresolved proof. Grouped source provenance identifies the historical calling CorDapp; rebuilt target artifacts and assessment labels are not attributed as callers. Human evidence shows current/target outcomes, while exact descriptors and separate coverage limits remain in exported reports.
+## Highlights
 
-Current node, target node and target external verifier now resolve in separate execution contexts. Supporting driver duplicates do not compete with selected runtime definitions. Proven verifier/legacy order selects one class without merging members; unproven ordering remains local to that context. Target replacement matching no longer obscures a confirmed runtime incompatibility. Human compatibility evidence shows each relevant runtime outcome, and sanitized support packages include execution-context and exact-symbol proof. Environment and compatibility/TVU evidence retain their established presentation. Result actions now include safe TVU execution and direct evidence import.
+- Current/target Corda and platform discovery, with separate Java requirement evidence.
+- Current/target CorDapp discovery and replacement mapping.
+- Exact runtime class, method and field checks, including inheritance and relevant verifier contexts.
+- PostgreSQL schema risk detection and imported schema-loading evidence.
+- Existing TVU summary/error parsing and failure correlation when detailed records match.
+- Concise terminal results, technical HTML/JSON/text reports and sanitized support packages.
+- Standalone Linux x86_64 distribution with private Java 17; existing node Java remains unchanged.
 
-Generic inherited-member resolution now handles facade/helper hierarchies without exhausting the archive-work budget through repeated full enumerations. Compatible exact inherited methods remain quiet, while missing or changed ancestor members remain incompatibilities. Interface defaults, constructors, access restrictions and invocation semantics are checked conservatively. Synthetic JVM oracles and packaged regressions cover a compatible inherited helper alongside one confirmed removed method, with and without all 201 correlated TVU failure records. Class-only verifier checks accept byte-identical definitions without guessing member precedence or flattening execution contexts. Unneeded member limits cannot create a false class-presence UNKNOWN. The packaged heap limit remains 256 MiB.
+v0.1.0 does not run TVU, start Corda, execute CorDapps, perform upgrades or change a database. Use it as an additional validation layer alongside the official Corda upgrade procedures.
 
-The normal result groups compatibility and TVU problems and explains what happened, why it matters, and what to do. Static success enables READY FOR TVU only. READY TO UPGRADE requires complete successful TVU evidence and no outstanding required findings. JSON retains distinct BLOCKED, UNKNOWN and WARNING states and documented exit codes.
+## Download and verify
 
-Schema analysis retains ordered PostgreSQL paths, agreed primary/default schemas and additional schemas. Conflicting defaults and unresolved values remain unproven. Known affected mixed-case PostgreSQL schemas can be prepared automatically for guided TVU and do not add an initial blocker. Actual matching Hibernate startup evidence marks the run schema handled; imported evidence without that proof and schema failures retain applicable blockers. Schema rules remain version and vendor aware. Discovery performs no database connection, query, migration or node modification.
+Download `ledger-preflight-0.1.0-linux-x86_64.tar.gz` and `SHA256SUMS` from the [v0.1.0 release](https://github.com/InfraGuard-Labs/ledgerpreflight/releases/tag/v0.1.0):
 
-Exact JVM member comparison and classpath/shadowing analysis remain generic. Two synthetic 650/449/201 fixtures distinguish three supplied failure records from all 201 supplied records. Correlation requires matching owner, member and descriptor and makes no claims about unsupplied records or real vendor patch behavior.
+```sh
+awk '$2 == "ledger-preflight-0.1.0-linux-x86_64.tar.gz"' SHA256SUMS | sha256sum -c -
+tar -xzf ledger-preflight-0.1.0-linux-x86_64.tar.gz
+cd ledger-preflight-0.1.0
+./ledger-preflight --help
+```
 
-The Linux x86_64 package bundles private Java 17; system Java remains unchanged. Validation uses clean Ubuntu 18.04, 20.04, 22.04 and 24.04, a separate Java 8 coexistence fixture, network-disabled operation, read-only inputs and non-root execution. Interactive tests exercise ASCII selection, arrows, cursor hiding/restoration, Ctrl+C, SIGTERM, exceptions, narrow terminals, CI and redirected output.
+Extract only after checksum verification succeeds. The repository's `install.sh` downloads and verifies this version before installation. See [README](../README.md) for static assessment and existing-TVU import commands.
 
-Build and validation evidence accompanies the candidate: clean Docker build logs, JUnit XML and test index, process and terminal summaries, acceptance reports, actual terminal screenshots, Ubuntu/Java 8 results, SBOM, security/public-source audits, support-package hashes and SHA256SUMS. Consult those results for exact counts and scan timestamps.
+## Evaluation limits
 
-Reports are secondary output artifacts: HTML, JSON and plain text. Sanitized R3 Support packages contain generated evidence, configuration signals, API/classpath/TVU analysis and hashes. Binaries, private keys and keystores are excluded. The completed ZIP is scanned again before it is accepted.
+Public tests and examples are synthetic. Static analysis cannot prove reflection, dynamic loading, full signer continuity or complete historical database coverage. Supplied TVU logs are not authenticated or cryptographically bound to the assessed snapshot. Review provenance, coverage and sanitized output before relying on or sharing a result.
 
-Known limits: synthetic fixtures do not validate licensed Corda artifacts. Reflection, dynamic loading, complete JVM access/module behavior and historical attachments are outside static certainty. Signing metadata is not cryptographic signer validation. Supplied TVU logs are not authenticated or cryptographically bound to a database snapshot. Operators must establish provenance, use the supported upgrade procedure, validate in a lower environment, and complete change controls. Very narrow terminals wrap longer explanations into scrollback. Cleanup hooks cannot run after SIGKILL or power loss.
-
-Development, building, fixture generation, testing, packaging and scanning run in Docker. The host stores project source and generated artifacts; no host Java, Gradle, Python, Node or database installation is required.
+The release validation summary records exact tests, Ubuntu/Java environments, artifact hashes and security scan results. Vulnerability results are dated evidence; they are not a guarantee that every bundled component is free of vulnerabilities. The supported evaluation platforms are Ubuntu 18.04, 20.04, 22.04 and 24.04 on x86_64, subject to those measured validation results.

@@ -95,7 +95,7 @@ class UniversalDiscoveryMatrixTest {
     void jdbcOnlyAndMatchingSchemaAreConsistentInFindings(boolean conflict)throws Exception {
         var f=SyntheticFixtureFactory.create(root,false);Files.writeString(f.node().resolve("node.conf"),"dataSource.url=\"jdbc:postgresql://example.net/example?currentSchema=ExampleMixedCaseIssuer\"\n"+(conflict?"database.schema=other":""));
         var a=new AssessmentService().assess(f.options(false));var cfg=(ConfigAnalyzer.ConfigEvidence)a.evidence().get("schema-analysis");var finding=a.findings().stream().filter(x->x.id().equals("LP-DB-001")).findFirst();
-        assertEquals(conflict?"Ambiguous":"ExampleMixedCaseIssuer",cfg.safeSettings().get("effectiveSchema"));if(conflict){assertTrue(finding.orElseThrow().title().contains("unresolved"));assertTrue(finding.orElseThrow().technicalEvidence().toString().contains("ExampleMixedCaseIssuer"));}else{assertTrue(finding.isEmpty());assertEquals("AUTO_CONFIGURABLE",ProductView.schemaSetupStatus(a));}
+        assertEquals(conflict?"Ambiguous":"ExampleMixedCaseIssuer",cfg.safeSettings().get("effectiveSchema"));if(conflict){assertTrue(finding.orElseThrow().title().contains("unresolved"));assertTrue(finding.orElseThrow().technicalEvidence().toString().contains("ExampleMixedCaseIssuer"));}else{assertEquals("BLOCKED",finding.orElseThrow().severity());assertEquals("REQUIRED_UNPROVEN",ProductView.schemaSetupStatus(a));}
         if(conflict)assertTrue(a.findings().stream().anyMatch(x->x.id().equals("LP-DB-002")&&x.confidence().equals("UNKNOWN")));
     }
     @Test void unsupportedSearchPathDoesNotClaimAnEffectiveSchema()throws Exception {
